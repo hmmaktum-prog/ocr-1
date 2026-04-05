@@ -1,22 +1,17 @@
+# ── Web App ──
 flask
 gunicorn
-python-docx
-pdf2image
-pillow
+
+# ── OCR & PDF Processing ──
 paddlepaddle>=3.2.1
 paddleocr[doc-parser]
 pymupdf
-numpy
-opencv-python-headless
-safetensors
-flask
-gunicorn
-kivy
-numpy
-opencv-python-headless
 pdf2image
 pillow
-pymupdf
 python-docx
+numpy
+opencv-python-headless
 safetensors
-paddleocr[doc-parser]
+
+# ── Mobile (Kivy) ──
+kivy

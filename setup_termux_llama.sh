@@ -166,7 +166,7 @@ echo -e "  ${CYAN}১.${NC} Termux-এ সার্ভার চালু কর
 echo -e "     ${YELLOW}bash $START_SCRIPT${NC}"
 echo ""
 echo -e "  ${CYAN}২.${NC} Android অ্যাপ খুলুন → ⚙ সেটিংস"
-echo -e "     → [b]VL-1.5 সার্ভার (llama.cpp)[/b] সিলেক্ট করুন"
+echo -e "     → ${BOLD}VL-1.5 সার্ভার (llama.cpp)${NC} সিলেক্ট করুন"
 echo -e "     → URL: ${YELLOW}http://localhost:8111/v1${NC}"
 echo -e "     → 'সংযোগ পরীক্ষা করুন' → সবুজ হলে সফল!"
 echo ""

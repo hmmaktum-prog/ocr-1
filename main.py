@@ -20,18 +20,8 @@ if 'ANDROID_ARGUMENT' in os.environ:
     os.environ['KIVY_NO_CONSOLELOG'] = '1'
 
     # Partial fix for SELinux avc: denied { ioctl } for /proc/cpuinfo.
-    # The native SDL/cpufeatures library issues an ioctl on /proc/cpuinfo to
-    # detect CPU variant; SELinux blocks it on many ROMs (results in a logcat W).
-    # We cannot stop the native ioctl, but we can reduce Kivy's own Python-level
-    # CPU/metric queries by pinning the density to a fixed value.
     os.environ.setdefault('KIVY_METRICS_DENSITY', '2')
     os.environ.setdefault('KIVY_METRICS_FONTSCALE', '1')
-    # Pre-read /proc/cpuinfo so Kivy's Python code gets it without an extra open()
-    try:
-        with open('/proc/cpuinfo', 'r') as _f:
-            _cpuinfo = _f.read()
-    except Exception:
-        _cpuinfo = ''
 
 # Disable kivy argument parsing (conflicts with Android)
 os.environ.setdefault('KIVY_NO_ENV_CONFIG', '0')
@@ -41,11 +31,9 @@ kivy.require('2.0.0')
 
 from kivy.config import Config
 # Fix E/OpenGLRenderer: Unable to match the desired swap behavior
-# (EGL_SWAP_BEHAVIOR_PRESERVED not supported on many Android devices/emulators)
-# Setting multisamples=0 prevents SDL from requesting the preserved swap behavior.
 Config.set('graphics', 'multisamples', '0')
 
-# Fix W/OpenGLRenderer: Failed to initialize 101010-2 format — use standard RGBA8888
+# Fix W/OpenGLRenderer: Failed to initialize 101010-2 format
 Config.set('graphics', 'depth', '16')
 
 Config.set('kivy', 'log_level', 'warning')
@@ -76,7 +64,6 @@ import json
 from pathlib import Path
 
 # ── Bengali font registration ─────────────────────────────────────────────────
-# Try multiple candidate paths so it works both on Android and desktop.
 _FONT_CANDIDATES = [
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "fonts", "NotoSansBengali-Regular.ttf"),
     os.path.join(os.environ.get('ANDROID_ARGUMENT', ''), "assets", "fonts", "NotoSansBengali-Regular.ttf"),
@@ -89,7 +76,6 @@ for _c in _FONT_CANDIDATES:
         break
 
 if _FONT_PATH:
-    # Register under multiple names so ALL widget types use Bengali glyphs
     for _fname in ("Roboto", "RobotoMono", "DroidSans", "DejaVuSans"):
         try:
             LabelBase.register(
@@ -153,10 +139,6 @@ C_TEXT_SUB  = (0.60, 0.62, 0.72, 1)       # subtitle gray
 C_DIVIDER   = (0.20, 0.21, 0.30, 1)       # subtle divider
 
 
-def rgba(color):
-    return color
-
-
 # ── UI helpers ────────────────────────────────────────────────────────────────
 
 class Card(RelativeLayout):
@@ -201,7 +183,8 @@ class RoundedButton(Button):
         self._btn_rect.size = self.size
 
     def _on_press(self, *args):
-        self._btn_color.rgba = tuple(max(0, c - 0.12) for c in self._base_color[:3]) + (1,)
+        # BUG-03 fix: preserve original alpha channel
+        self._btn_color.rgba = tuple(max(0.0, c - 0.12) for c in self._base_color[:3]) + (self._base_color[3],)
 
     def _on_release(self, *args):
         self._btn_color.rgba = self._base_color
@@ -232,6 +215,7 @@ class HeadingLabel(Label):
 class PDFToDocxConverter:
     def __init__(self):
         self.is_processing = False
+        self._lock = threading.Lock()  # BUG-02 fix: thread-safe processing flag
 
     def convert_pdf_to_docx(self, pdf_path, output_path, progress_callback=None):
         try:
@@ -263,12 +247,6 @@ class SettingsPopup(Popup):
         root = BoxLayout(orientation="vertical", padding=dp(16), spacing=dp(12))
 
         # Mode selector
-        SectionLabel_ = lambda t: Label(
-            text=t, color=C_TEXT_SUB, font_size=sp(12),
-            halign='left', size_hint_y=None, height=dp(22),
-            text_size=(self.width * 0.9, None),
-        )
-
         mode_lbl = Label(
             text="OCR মোড", color=C_TEXT_SUB, font_size=sp(12),
             halign='left', size_hint_y=None, height=dp(22),
@@ -380,17 +358,21 @@ class SettingsPopup(Popup):
         self._test_btn.disabled = not is_vl
 
     def _test_connection(self, btn):
-        self._test_result.text = "[color=888888]পরীক্ষা করা হচ্ছে…[/color]"
+        """BUG-01 fix: run connection test in a background thread to avoid UI freeze."""
+        self._test_result.text = "[color=888888]পরীক্ষা করা হচ্ছে...[/color]"
 
-        def _check(dt):
+        def _worker():
             from ocr_engine import test_llama_server
             ok, msg = test_llama_server(self._url_input.text.strip())
-            if ok:
-                self._test_result.text = f"[color=22cc66]সংযুক্ত: {msg}[/color]"
-            else:
-                self._test_result.text = f"[color=ff4444]ব্যর্থ: {msg}[/color]"
+            Clock.schedule_once(lambda dt: self._show_test_result(ok, msg), 0)
 
-        Clock.schedule_once(_check, 0.1)
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _show_test_result(self, ok, msg):
+        if ok:
+            self._test_result.text = f"[color=22cc66]সংযুক্ত: {msg}[/color]"
+        else:
+            self._test_result.text = f"[color=ff4444]ব্যর্থ: {msg}[/color]"
 
     def _save(self, btn):
         is_vl = "VL-1.5" in self._mode_spinner.text
@@ -428,13 +410,14 @@ class FilePicker(Popup):
             self._fc.font_name = _FONT_PATH
         root.add_widget(self._fc)
 
-        # Current path display
+        # Current path display — BUG-06 fix: use dynamic text_size binding
         self._path_label = Label(
             text=initial_path,
             color=C_TEXT_SUB, font_size=sp(11),
             size_hint_y=None, height=dp(22),
-            halign='left', text_size=(self.width, None),
+            halign='left',
         )
+        self._path_label.bind(size=self._path_label.setter('text_size'))
         self._fc.bind(path=lambda inst, val: setattr(self._path_label, 'text', val))
         root.add_widget(self._path_label)
 
@@ -464,22 +447,30 @@ class PDFToDocxApp(App):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.converter = PDFToDocxConverter()
-        self.selected_pdf = None
+        self.selected_pdf: str | None = None
         self._settings = load_settings()
         self._apply_ocr_settings()
 
     def on_start(self):
-        Window.clearcolor = C_BG
         if _IS_ANDROID:
             Clock.schedule_once(lambda dt: self._request_android_permissions(), 0.5)
 
     def _request_android_permissions(self):
+        """BUG-07 fix: request appropriate permissions for Android version."""
         try:
             from android.permissions import request_permissions, Permission  # type: ignore
-            request_permissions([
+            perms = [
                 Permission.READ_EXTERNAL_STORAGE,
                 Permission.WRITE_EXTERNAL_STORAGE,
-            ])
+            ]
+            # Android 11+ (API 30+) needs MANAGE_EXTERNAL_STORAGE
+            try:
+                from android import api_version  # type: ignore
+                if api_version >= 30:
+                    perms.append(Permission.MANAGE_EXTERNAL_STORAGE)
+            except Exception:
+                pass
+            request_permissions(perms)
         except Exception:
             pass
 
@@ -541,12 +532,15 @@ class PDFToDocxApp(App):
                          size_hint_y=None, height=dp(130))
         file_inner = BoxLayout(orientation='vertical', padding=dp(14), spacing=dp(8))
 
+        # BUG-11 fix: add text_size binding for halign to work
         file_title_row = BoxLayout(size_hint_y=None, height=dp(22))
-        file_title_row.add_widget(Label(
+        file_section_lbl = Label(
             text="ফাইল নির্বাচন", color=C_TEXT_SUB,
             font_size=sp(12), halign='left',
             size_hint_x=1,
-        ))
+        )
+        file_section_lbl.bind(size=file_section_lbl.setter('text_size'))
+        file_title_row.add_widget(file_section_lbl)
         file_inner.add_widget(file_title_row)
 
         self.file_name_label = Label(
@@ -632,15 +626,18 @@ class PDFToDocxApp(App):
             font_size=sp(13), halign='left', valign='top',
             size_hint_y=None, padding=(dp(14), dp(12)),
         )
+        # BUG-09 fix: safe texture_size binding with None check
+        def _update_info_height(*args):
+            ts = self.info_label.texture_size
+            if ts and ts[1]:
+                self.info_label.height = ts[1] + dp(24)
+                self.info_card.height = min(dp(260), ts[1] + dp(36))
+
         self.info_label.bind(
             width=lambda *x: self.info_label.setter('text_size')(
                 self.info_label, (self.info_label.width, None)
             ),
-            texture_size=lambda *x: (
-                setattr(self.info_label, 'height', self.info_label.texture_size[1] + dp(24)),
-                setattr(self.info_card, 'height',
-                        min(dp(260), self.info_label.texture_size[1] + dp(36))),
-            ),
+            texture_size=_update_info_height,
         )
         info_scroll.add_widget(self.info_label)
         self.info_card.add_widget(info_scroll)
@@ -725,16 +722,32 @@ class PDFToDocxApp(App):
         """Change status card left border color via canvas."""
         pass  # subtle — kept simple
 
+    def _get_unique_output_path(self, output_dir: str, stem: str) -> str:
+        """BUG-08 fix: generate unique output path to avoid overwriting."""
+        output_path = os.path.join(output_dir, stem + "_converted.docx")
+        if not os.path.exists(output_path):
+            return output_path
+        counter = 2
+        while True:
+            output_path = os.path.join(output_dir, f"{stem}_converted_{counter}.docx")
+            if not os.path.exists(output_path):
+                return output_path
+            counter += 1
+
     def start_conversion(self, instance):
         if not self.selected_pdf:
             self.status_label.text = "[color=ff6666]প্রথমে একটি PDF ফাইল নির্বাচন করুন[/color]"
             self.status_label.color = C_ERROR
             return
-        if self.converter.is_processing:
-            self.status_label.text = "[color=ffbb33]প্রক্রিয়াকরণ চলছে, অপেক্ষা করুন[/color]"
-            return
 
-        pdf_path = Path(self.selected_pdf)
+        # BUG-02 fix: thread-safe check for is_processing
+        with self.converter._lock:
+            if self.converter.is_processing:
+                self.status_label.text = "[color=ffbb33]প্রক্রিয়াকরণ চলছে, অপেক্ষা করুন[/color]"
+                return
+            self.converter.is_processing = True
+
+        pdf_path = Path(self.selected_pdf)  # type: ignore[arg-type]  # guarded by L738
 
         # Output next to source file or in downloads
         if _IS_ANDROID:
@@ -749,14 +762,14 @@ class PDFToDocxApp(App):
         else:
             output_dir = str(pdf_path.parent)
 
-        output_path = os.path.join(output_dir, pdf_path.stem + "_converted.docx")
+        # BUG-08 fix: unique output path
+        output_path = self._get_unique_output_path(output_dir, pdf_path.stem)
         self._output_path = output_path
 
-        self.status_label.text = "শুরু হচ্ছে…"
+        self.status_label.text = "শুরু হচ্ছে..."
         self.status_label.color = C_TEXT
         self.progress_bar.value = 3
         self.share_btn.opacity = 0
-        self.converter.is_processing = True
         self.convert_btn.disabled = True
 
         thread = threading.Thread(
@@ -767,20 +780,28 @@ class PDFToDocxApp(App):
         thread.start()
 
     def _conversion_thread(self, pdf_path: str, output_path: str):
-        def progress_callback(current, total):
-            pct = int(((current + 1) / total) * 90) + 5
-            msg = f"পৃষ্ঠা {current + 1} / {total} প্রক্রিয়া হচ্ছে…"
-            Clock.schedule_once(lambda dt: self._update_progress(pct, msg), 0)
+        # BUG-12 fix: try/finally to ensure cleanup even on unexpected crash
+        try:
+            def progress_callback(current, total):
+                pct = int(((current + 1) / total) * 90) + 5
+                msg = f"পৃষ্ঠা {current + 1} / {total} প্রক্রিয়া হচ্ছে..."
+                # BUG-13 fix: default arg capture to avoid late binding
+                Clock.schedule_once(lambda dt, p=pct, m=msg: self._update_progress(p, m), 0)
 
-        success, message = self.converter.convert_pdf_to_docx(
-            pdf_path, output_path, progress_callback
-        )
-        self.converter.is_processing = False
+            success, message = self.converter.convert_pdf_to_docx(
+                pdf_path, output_path, progress_callback
+            )
 
-        if success:
-            Clock.schedule_once(lambda dt: self._on_success(output_path), 0)
-        else:
-            Clock.schedule_once(lambda dt: self._on_failure(message), 0)
+            if success:
+                Clock.schedule_once(lambda dt: self._on_success(output_path), 0)
+            else:
+                Clock.schedule_once(lambda dt: self._on_failure(message), 0)
+        except Exception as e:
+            Clock.schedule_once(lambda dt: self._on_failure(str(e)), 0)
+        finally:
+            # BUG-02 + BUG-12 fix: always reset processing flag
+            with self.converter._lock:
+                self.converter.is_processing = False
 
     def _update_progress(self, pct: int, msg: str):
         self.progress_bar.value = pct
@@ -825,7 +846,8 @@ class PDFToDocxApp(App):
                 intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 activity._activity.startActivity(intent)
             except Exception as e:
-                self.status_label.text = f"শেয়ার ব্যর্থ: {str(e)[:60]}"
+                err_msg = str(e)[:60]
+                self.status_label.text = f"শেয়ার ব্যর্থ: {err_msg}"
         else:
             import subprocess
             try:

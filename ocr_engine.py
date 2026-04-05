@@ -11,6 +11,8 @@ Offline model cache:
   - PaddlePaddle models: ./models/  (or $PADDLEOCR_MODEL_DIR)
 """
 
+from __future__ import annotations  # BUG-26 fix: Python 3.8 compat for type hints
+
 import os
 import io
 import re
@@ -156,7 +158,7 @@ def _get_vl_pipeline():
 # llama-cpp-server connectivity check
 # ---------------------------------------------------------------------------
 
-def test_llama_server(url: str = None) -> tuple[bool, str]:
+def test_llama_server(url: str | None = None) -> tuple:
     """
     Test connection to a llama-cpp-server.
     Returns (success: bool, message: str).
@@ -230,16 +232,13 @@ def _extract_markdown_from_vl_result(res) -> str:
         except Exception as exc:
             logger.debug("save_to_markdown failed: %s", exc)
 
-    # Attempt 3: capture res.print()
+    # Attempt 3: capture res.print() — BUG-20 fix: use StringIO without global redirect
     if not markdown_text:
         try:
+            import contextlib
             buf = io.StringIO()
-            old_stdout = sys.stdout
-            sys.stdout = buf
-            try:
+            with contextlib.redirect_stdout(buf):
                 res.print()
-            finally:
-                sys.stdout = old_stdout
             markdown_text = buf.getvalue()
         except Exception as exc:
             logger.debug("res.print() capture failed: %s", exc)
@@ -423,32 +422,122 @@ def _ocr_image_via_llama_direct(img_bytes: bytes, server_url: str, task: str = "
         ) from exc
 
 
-def _pdf_to_images(pdf_path: str, dpi: int = 150) -> list:
-    """Render PDF pages to PIL Images using PyMuPDF or pdf2image."""
-    images = []
+def _pdf_to_images(pdf_path: str, dpi: int = 150):
+    """
+    Render PDF pages to PIL Images using Android Native API, PyMuPDF, or pdf2image.
+    Yields PIL Images one by one.
+    """
+    # 1. Try Android Native PdfRenderer via Pyjnius (No native C dependencies needed!)
+    try:
+        from jnius import autoclass
+        from PIL import Image
+        import io
+        
+        File = autoclass('java.io.File')
+        ParcelFileDescriptor = autoclass('android.os.ParcelFileDescriptor')
+        PdfRenderer = autoclass('android.graphics.pdf.PdfRenderer')
+        Bitmap = autoclass('android.graphics.Bitmap')
+        BitmapConfig = autoclass('android.graphics.Bitmap$Config')
+        Color = autoclass('android.graphics.Color')
+        CompressFormat = autoclass('android.graphics.Bitmap$CompressFormat')
+        ByteArrayOutputStream = autoclass('java.io.ByteArrayOutputStream')
 
-    # Try PyMuPDF first (works on Android)
+        file_obj = File(str(pdf_path))
+        pfd = ParcelFileDescriptor.open(file_obj, ParcelFileDescriptor.MODE_READ_ONLY)
+        renderer = PdfRenderer(pfd)
+        
+        page_count = renderer.getPageCount()
+        
+        for i in range(page_count):
+            page = renderer.openPage(i)
+            # Default PDF dpi is 72. Scale up
+            scale = dpi / 72.0
+            width = int(page.getWidth() * scale)
+            height = int(page.getHeight() * scale)
+            
+            bitmap = Bitmap.createBitmap(width, height, BitmapConfig.ARGB_8888)
+            bitmap.eraseColor(Color.WHITE)
+            
+            page.render(bitmap, None, None, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+            
+            stream = ByteArrayOutputStream()
+            bitmap.compress(CompressFormat.PNG, 100, stream)
+            image_bytes = bytes(stream.toByteArray())
+            
+            img = Image.open(io.BytesIO(image_bytes))
+            yield img
+            
+            page.close()
+            bitmap.recycle()
+            stream.close()
+            
+        renderer.close()
+        pfd.close()
+        return
+    except ImportError:
+        pass  # Not on Android
+    except Exception as exc:
+        logger.warning("Android Native PDF renderer failed: %s", exc)
+
+    # 2. Try PyMuPDF (Desktop)
     try:
         import fitz
         from PIL import Image
 
-        pdf_doc = fitz.open(pdf_path)
-        for page in pdf_doc:
-            mat = fitz.Matrix(dpi / 72, dpi / 72)
-            pix = page.get_pixmap(matrix=mat)
-            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-            images.append(img)
-        pdf_doc.close()
-        return images
+        # BUG-22 fix: use context manager for safe document close
+        with fitz.open(pdf_path) as pdf_doc:
+            for page in pdf_doc:
+                mat = fitz.Matrix(dpi / 72, dpi / 72)
+                pix = page.get_pixmap(matrix=mat)
+                img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                yield img
+        return
+    except ImportError:
+        pass
     except Exception:
         pass
 
-    # Fallback: pdf2image (desktop only)
+    # Fallback: pdf2image (desktop only) — returns list, wrap as generator
     try:
         from pdf2image import convert_from_path
-        return convert_from_path(pdf_path, dpi=dpi)
+        for img in convert_from_path(pdf_path, dpi=dpi):
+            yield img
+        return
     except Exception as exc:
         raise RuntimeError(f"PDF পৃষ্ঠা পড়তে ব্যর্থ: {exc}") from exc
+
+
+def _pdf_page_count(pdf_path: str) -> int:
+    """Get total page count without rendering (for progress reporting)."""
+    # 1. Android Native
+    try:
+        from jnius import autoclass
+        File = autoclass('java.io.File')
+        ParcelFileDescriptor = autoclass('android.os.ParcelFileDescriptor')
+        PdfRenderer = autoclass('android.graphics.pdf.PdfRenderer')
+        file_obj = File(str(pdf_path))
+        pfd = ParcelFileDescriptor.open(file_obj, ParcelFileDescriptor.MODE_READ_ONLY)
+        renderer = PdfRenderer(pfd)
+        count = renderer.getPageCount()
+        renderer.close()
+        pfd.close()
+        return count
+    except Exception:
+        pass
+
+    # 2. PyMuPDF fallback
+    try:
+        import fitz
+        with fitz.open(pdf_path) as doc:
+            return len(doc)
+    except Exception:
+        pass
+    try:
+        from pdf2image import pdfinfo_from_path
+        info = pdfinfo_from_path(pdf_path)
+        return info.get("Pages", 0)
+    except Exception:
+        return 0
 
 
 def _image_to_png_bytes(image) -> bytes:
@@ -477,8 +566,17 @@ def ocr_image_bytes(img_bytes: bytes) -> str:
             return _ocr_image_via_llama_direct(img_bytes, _config.llama_server_url)
         except Exception as exc:
             logger.warning("Direct llama OCR failed: %s", exc)
+            # BUG-17 fix: skip VL pipeline when in llama mode, go straight to classic
+            classic = _init_classic_ocr()
+            if classic is not None:
+                try:
+                    results = classic.ocr(img_bytes, cls=True)
+                    return _extract_text_from_classic_result(results)
+                except Exception as exc2:
+                    logger.error("Classic OCR also failed: %s", exc2)
+            return ""
 
-    # 2. PaddleOCRVL pipeline (desktop)
+    # 2. PaddleOCRVL pipeline (desktop — only when NOT in llama mode)
     vl = _get_vl_pipeline()
     if vl is not None:
         try:
@@ -526,12 +624,12 @@ def ocr_pdf(pdf_path: str, progress_callback=None) -> list:
     if _config.use_llama_server:
         try:
             logger.info("Direct llama.cpp OCR: %s", pdf_path)
-            images = _pdf_to_images(pdf_path)
-            total = len(images)
-            for page_num, image in enumerate(images):
+            total = _pdf_page_count(pdf_path) or 1
+            for page_num, image in enumerate(_pdf_to_images(pdf_path)):
                 if progress_callback:
                     progress_callback(page_num, total)
                 img_bytes = _image_to_png_bytes(image)
+                del image  # free memory immediately
                 try:
                     md_text = _ocr_image_via_llama_direct(
                         img_bytes, _config.llama_server_url
@@ -539,6 +637,7 @@ def ocr_pdf(pdf_path: str, progress_callback=None) -> list:
                 except Exception as exc:
                     logger.warning("Page %d llama OCR failed: %s", page_num, exc)
                     md_text = f"[পৃষ্ঠা {page_num + 1}: সার্ভার ত্রুটি — {exc}]"
+                del img_bytes  # free memory immediately
                 results.append((page_num, md_text))
             return results
         except Exception as exc:
@@ -546,39 +645,42 @@ def ocr_pdf(pdf_path: str, progress_callback=None) -> list:
             results = []
 
     # --- 2. PaddleOCRVL pipeline (desktop, full PDF) ---
-    vl = _get_vl_pipeline()
-    if vl is not None:
-        try:
-            logger.info("VL pipeline: processing %s", pdf_path)
-            output = list(vl.predict(pdf_path))
-            total = len(output)
-            for page_num, res in enumerate(output):
-                if progress_callback:
-                    progress_callback(page_num, total)
-                md_text = _extract_markdown_from_vl_result(res)
-                results.append((page_num, md_text))
-            if results:
-                return results
-        except Exception as exc:
-            logger.warning("VL pipeline PDF processing failed: %s — falling back.", exc)
-            results = []
+    if not _config.use_llama_server:  # BUG-17 fix: only try VL when not in llama mode
+        vl = _get_vl_pipeline()
+        if vl is not None:
+            try:
+                logger.info("VL pipeline: processing %s", pdf_path)
+                output = list(vl.predict(pdf_path))
+                total = len(output)
+                for page_num, res in enumerate(output):
+                    if progress_callback:
+                        progress_callback(page_num, total)
+                    md_text = _extract_markdown_from_vl_result(res)
+                    results.append((page_num, md_text))
+                if results:
+                    return results
+            except Exception as exc:
+                logger.warning("VL pipeline PDF processing failed: %s — falling back.", exc)
+                results = []
 
     # --- 3. Classic PaddleOCR (desktop fallback) ---
     logger.info("Fallback: classic PaddleOCR page-by-page.")
+    total = _pdf_page_count(pdf_path) or 1
+
     try:
-        images = _pdf_to_images(pdf_path)
+        image_gen = _pdf_to_images(pdf_path)
     except Exception as exc:
         logger.error("Cannot read PDF pages: %s", exc)
         return [(0, f"[PDF পড়তে ব্যর্থ: {exc}]")]
 
-    total = len(images)
     classic = _init_classic_ocr()
 
-    for page_num, image in enumerate(images):
+    for page_num, image in enumerate(image_gen):
         if progress_callback:
             progress_callback(page_num, total)
 
         img_bytes = _image_to_png_bytes(image)
+        del image  # free memory immediately
         text = ""
         if classic is not None:
             try:
@@ -587,6 +689,7 @@ def ocr_pdf(pdf_path: str, progress_callback=None) -> list:
             except Exception as exc:
                 logger.warning("Classic OCR page %d failed: %s", page_num, exc)
 
+        del img_bytes  # free memory immediately
         results.append((page_num, text or f"[পৃষ্ঠা {page_num + 1}: কোনো টেক্সট পাওয়া যায়নি]"))
 
     return results

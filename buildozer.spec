@@ -10,7 +10,7 @@ source.exclude_dirs = .git,.buildozer,.pythonlibs,.local,.github,models,__pycach
 
 version = 1.2.0
 
-requirements = python3,kivy==2.3.0,pillow,python-docx,numpy,pymupdf
+requirements = python3,kivy==2.3.0,pillow,python-docx,numpy
 
 orientation = portrait
 fullscreen = 0

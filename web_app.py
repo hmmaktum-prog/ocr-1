@@ -1,6 +1,7 @@
 import os
 import io
 import uuid
+import time
 import threading
 import tempfile
 from pathlib import Path
@@ -8,12 +9,69 @@ from flask import Flask, render_template_string, request, jsonify, send_file
 
 app = Flask(__name__)
 
+# ── Security: MAX_CONTENT_LENGTH prevents large uploads from filling memory ──
+MAX_UPLOAD_SIZE_MB = 50
+app.config['MAX_CONTENT_LENGTH'] = MAX_UPLOAD_SIZE_MB * 1024 * 1024  # BUG-35 fix
+
 UPLOAD_FOLDER = tempfile.mkdtemp()
 OUTPUT_FOLDER = tempfile.mkdtemp()
-MAX_UPLOAD_SIZE_MB = 50
+
+# ── Rate limiting: max concurrent conversions ────────────────────────────────
+MAX_CONCURRENT_JOBS = 3  # BUG-29 fix
 
 conversion_status = {}
 conversion_lock = threading.Lock()
+
+# ── Cleanup old jobs & files (BUG-28 + BUG-32 fix) ──────────────────────────
+JOB_MAX_AGE_SECONDS = 3600  # 1 hour
+
+
+def _cleanup_old_jobs():
+    """Periodically remove finished jobs and their files from disk and memory."""
+    while True:
+        time.sleep(300)  # every 5 minutes
+        now = time.time()
+        keys_to_remove = []
+        with conversion_lock:
+            for job_id, info in conversion_status.items():
+                created = info.get('_created_at', 0)
+                if now - created > JOB_MAX_AGE_SECONDS:
+                    keys_to_remove.append(job_id)
+            for k in keys_to_remove:
+                del conversion_status[k]
+
+        # Clean corresponding files
+        for job_id in keys_to_remove:
+            pdf = os.path.join(UPLOAD_FOLDER, f'{job_id}.pdf')
+            try:
+                if os.path.exists(pdf):
+                    os.unlink(pdf)
+            except OSError:
+                pass
+        # Remove output files older than max age
+        try:
+            for fname in os.listdir(OUTPUT_FOLDER):
+                fpath = os.path.join(OUTPUT_FOLDER, fname)
+                if os.path.isfile(fpath):
+                    age = now - os.path.getmtime(fpath)
+                    if age > JOB_MAX_AGE_SECONDS:
+                        os.unlink(fpath)
+        except OSError:
+            pass
+
+
+_cleanup_thread = threading.Thread(target=_cleanup_old_jobs, daemon=True)
+_cleanup_thread.start()
+
+
+# ── Security headers (BUG-33 fix) ───────────────────────────────────────────
+@app.after_request
+def add_security_headers(response):
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    return response
+
 
 HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="bn">
@@ -362,6 +420,15 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 </html>"""
 
 
+def _count_running_jobs() -> int:
+    """Count currently running conversion jobs."""
+    count = 0
+    for info in conversion_status.values():
+        if info.get('status') == 'running':
+            count += 1
+    return count
+
+
 def do_conversion(job_id, pdf_path, output_path):
     try:
         from ocr_engine import ocr_pdf, build_docx_from_ocr_results
@@ -369,22 +436,22 @@ def do_conversion(job_id, pdf_path, output_path):
         def progress_callback(current, total):
             progress = 15 + int(((current + 1) / total) * 75)
             with conversion_lock:
-                conversion_status[job_id]['progress'] = progress
-                conversion_status[job_id]['message'] = (
-                    f'পৃষ্ঠা {current + 1}/{total} প্রক্রিয়া হচ্ছে…'
-                )
+                if job_id in conversion_status:
+                    conversion_status[job_id]['progress'] = progress
+                    conversion_status[job_id]['message'] = (
+                        f'পৃষ্ঠা {current + 1}/{total} প্রক্রিয়া হচ্ছে…'
+                    )
 
         with conversion_lock:
-            conversion_status[job_id] = {
-                'status': 'running', 'progress': 5,
-                'message': 'OCR ইঞ্জিন লোড হচ্ছে…'
-            }
+            conversion_status[job_id]['progress'] = 5
+            conversion_status[job_id]['message'] = 'OCR ইঞ্জিন লোড হচ্ছে…'
 
         ocr_results = ocr_pdf(pdf_path, progress_callback=progress_callback)
 
         with conversion_lock:
-            conversion_status[job_id]['message'] = 'DOCX তৈরি হচ্ছে…'
-            conversion_status[job_id]['progress'] = 92
+            if job_id in conversion_status:
+                conversion_status[job_id]['message'] = 'DOCX তৈরি হচ্ছে…'
+                conversion_status[job_id]['progress'] = 92
 
         doc = build_docx_from_ocr_results(ocr_results)
         doc.save(output_path)
@@ -392,15 +459,24 @@ def do_conversion(job_id, pdf_path, output_path):
         with conversion_lock:
             conversion_status[job_id] = {
                 'status': 'done', 'progress': 100,
-                'message': 'রূপান্তর সম্পন্ন!'
+                'message': 'রূপান্তর সম্পন্ন!',
+                '_created_at': conversion_status.get(job_id, {}).get('_created_at', time.time()),
             }
 
     except Exception as e:
         with conversion_lock:
             conversion_status[job_id] = {
                 'status': 'error', 'progress': 0,
-                'message': f'ত্রুটি: {str(e)}'
+                'message': f'ত্রুটি: {str(e)}',
+                '_created_at': conversion_status.get(job_id, {}).get('_created_at', time.time()),
             }
+    finally:
+        # BUG-32 fix: clean up uploaded PDF after conversion
+        try:
+            if os.path.exists(pdf_path):
+                os.unlink(pdf_path)
+        except OSError:
+            pass
 
 
 @app.route('/')
@@ -417,12 +493,14 @@ def convert():
     if not file.filename or not file.filename.lower().endswith('.pdf'):
         return jsonify({'success': False, 'error': 'শুধুমাত্র PDF ফাইল সমর্থিত'})
 
-    file.seek(0, 2)
-    file_size_mb = file.tell() / (1024 * 1024)
-    file.seek(0)
-    if file_size_mb > MAX_UPLOAD_SIZE_MB:
-        return jsonify({'success': False,
-                        'error': f'ফাইলটি খুব বড়। সর্বোচ্চ {MAX_UPLOAD_SIZE_MB}MB।'})
+    # BUG-29 fix: rate limiting — check concurrent jobs
+    with conversion_lock:
+        running = _count_running_jobs()
+        if running >= MAX_CONCURRENT_JOBS:
+            return jsonify({
+                'success': False,
+                'error': f'সার্ভার ব্যস্ত। সর্বোচ্চ {MAX_CONCURRENT_JOBS}টি কাজ একসাথে চলতে পারে।'
+            })
 
     job_id = str(uuid.uuid4())[:8]
     pdf_path = os.path.join(UPLOAD_FOLDER, f'{job_id}.pdf')
@@ -432,8 +510,13 @@ def convert():
 
     file.save(pdf_path)
 
+    # BUG-30 fix: set status only once, in a single place
     with conversion_lock:
-        conversion_status[job_id] = {'status': 'running', 'progress': 3, 'message': 'শুরু হচ্ছে…'}
+        conversion_status[job_id] = {
+            'status': 'running', 'progress': 3,
+            'message': 'শুরু হচ্ছে…',
+            '_created_at': time.time(),
+        }
 
     thread = threading.Thread(target=do_conversion, args=(job_id, pdf_path, output_path))
     thread.daemon = True
@@ -448,7 +531,9 @@ def status(job_id):
         data = conversion_status.get(
             job_id, {'status': 'unknown', 'progress': 0, 'message': 'অজানা কাজ'}
         )
-    return jsonify(data)
+        # Don't expose internal keys to clients
+        public = {k: v for k, v in data.items() if not k.startswith('_')}
+    return jsonify(public)
 
 
 @app.route('/download/<filename>')
