@@ -19,10 +19,13 @@ import re
 import sys
 import tempfile
 import logging
+import threading
 from pathlib import Path
 from typing import Tuple, List
 
 logger = logging.getLogger(__name__)
+
+_print_lock = threading.Lock()
 
 MODEL_DIR = Path(os.environ.get("PADDLEOCR_MODEL_DIR", "./models"))
 GGUF_DIR = MODEL_DIR / "gguf"
@@ -173,6 +176,11 @@ def test_llama_server(url: str | None = None) -> tuple:
     if base.endswith("/v1"):
         base = base[:-3]
     base = base.rstrip("/")
+    
+    parsed = urllib.parse.urlparse(base)
+    if parsed.hostname not in ("localhost", "127.0.0.1", "0.0.0.0"):
+        return False, "নিরাপত্তা ত্রুটি: শুধুমাত্র localhost বা 127.0.0.1 অনুমোদিত"
+
     health_url = base + "/health"
 
     try:
@@ -238,8 +246,9 @@ def _extract_markdown_from_vl_result(res) -> str:
         try:
             import contextlib
             buf = io.StringIO()
-            with contextlib.redirect_stdout(buf):
-                res.print()
+            with _print_lock:
+                with contextlib.redirect_stdout(buf):
+                    res.print()
             markdown_text = buf.getvalue()
         except Exception as exc:
             logger.debug("res.print() capture failed: %s", exc)
@@ -307,18 +316,18 @@ def markdown_to_docx_page(doc, markdown_text: str, page_num: int):
         for r_idx, row in enumerate(parsed):
             for c_idx, cell_text in enumerate(row):
                 if c_idx < col_count:
-                    clean = re.sub(r"\*\*(.+?)\*\*", r"\1", cell_text)
-                    clean = re.sub(r"\*(.+?)\*", r"\1", clean)
+                    clean = re.sub(r"\*\*([^*]+)\*\*", r"\1", cell_text)
+                    clean = re.sub(r"\*([^*]+)\*", r"\1", clean)
                     t.cell(r_idx, c_idx).text = clean
         in_table = False
         table_rows = []
 
     def strip_inline(text: str) -> str:
-        text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
-        text = re.sub(r"\*(.+?)\*", r"\1", text)
-        text = re.sub(r"`(.+?)`", r"\1", text)
-        text = re.sub(r"!\[.*?\]\(.*?\)", "", text)
-        text = re.sub(r"\[(.+?)\]\(.*?\)", r"\1", text)
+        text = re.sub(r"\*\*([^*]+)\*\*", r"\1", text)
+        text = re.sub(r"\*([^*]+)\*", r"\1", text)
+        text = re.sub(r"`([^`]+)`", r"\1", text)
+        text = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", text)
+        text = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", text)
         return text.strip()
 
     for line in lines:
@@ -461,16 +470,18 @@ def _pdf_to_images(pdf_path: str, dpi: int = 150):
             
             page.render(bitmap, None, None, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
             
-            stream = ByteArrayOutputStream()
-            bitmap.compress(CompressFormat.PNG, 100, stream)
-            image_bytes = bytes(stream.toByteArray())
+            ByteBuffer = autoclass('java.nio.ByteBuffer')
+            buffer = ByteBuffer.allocate(bitmap.getByteCount())
+            bitmap.copyPixelsToBuffer(buffer)
             
-            img = Image.open(io.BytesIO(image_bytes))
+            image_bytes = bytes(buffer.array())
+            img = Image.frombytes("RGBA", (width, height), image_bytes)
+            img = img.convert("RGB")
             yield img
             
             page.close()
             bitmap.recycle()
-            stream.close()
+            buffer.clear()
             
         renderer.close()
         pfd.close()
@@ -498,11 +509,15 @@ def _pdf_to_images(pdf_path: str, dpi: int = 150):
     except Exception:
         pass
 
-    # Fallback: pdf2image (desktop only) — returns list, wrap as generator
+    # Fallback: pdf2image (desktop only) — return generators
     try:
-        from pdf2image import convert_from_path
-        for img in convert_from_path(pdf_path, dpi=dpi):
-            yield img
+        from pdf2image import convert_from_path, pdfinfo_from_path
+        info = pdfinfo_from_path(pdf_path)
+        pages = info.get("Pages", 1)
+        for i in range(1, pages + 1):
+            images = convert_from_path(pdf_path, dpi=dpi, first_page=i, last_page=i)
+            if images:
+                yield images[0]
         return
     except Exception as exc:
         raise RuntimeError(f"PDF পৃষ্ঠা পড়তে ব্যর্থ: {exc}") from exc

@@ -24,9 +24,9 @@ android.archs = arm64-v8a
 android.enable_androidx = True
 android.release_artifact = apk
 
-# Allow cleartext HTTP for llama.cpp localhost server
+# Allow cleartext HTTP for llama.cpp localhost server only
 android.manifest.uses_permission = android.permission.INTERNET
-android.manifest.application_attribs = android:usesCleartextTraffic="true"
+android.manifest.application_attribs = android:networkSecurityConfig="@xml/network_security_config"
 
 # FileProvider configuration for sharing DOCX files
 android.add_src = android_config

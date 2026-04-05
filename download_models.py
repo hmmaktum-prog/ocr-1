@@ -67,16 +67,16 @@ def _extract_tar(tar_path: Path, dest_dir: Path, expected_name: str):
         return
     logger.info("এক্সট্রাক্ট হচ্ছে: %s", tar_path.name)
     with tarfile.open(tar_path, "r:gz") as tf:
+        members = tf.getmembers()
+        tar_root = members[0].name.split('/')[0] if members else None
         # BUG-37 fix: use filter='data' to prevent path traversal (Python 3.12+)
         try:
             tf.extractall(dest_dir, filter='data')
         except TypeError:
             tf.extractall(dest_dir)
     # Rename if needed
-    for item in dest_dir.iterdir():
-        if item.is_dir() and item.name != expected_name and expected_name.lower() in item.name.lower():
-            item.rename(dest_dir / expected_name)
-            break
+    if tar_root and (dest_dir / tar_root).exists() and tar_root != expected_name:
+        (dest_dir / tar_root).rename(dest_dir / expected_name)
     tar_path.unlink(missing_ok=True)
 
 

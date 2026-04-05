@@ -63,8 +63,8 @@ jobs:
             -keysize 2048 \
             -validity 10000 \
             -dname "CN=PDF to DOCX OCR, OU=App, O=OCR, L=Dhaka, S=Dhaka, C=BD" \
-            -storepass pdfocr2024 \
-            -keypass pdfocr2024 \
+            -storepass "${{ secrets.KEYSTORE_PASSWORD || 'pdfocr2024' }}" \
+            -keypass "${{ secrets.KEYSTORE_PASSWORD || 'pdfocr2024' }}" \
             -storetype JKS
           echo "KEYSTORE_PATH=${{ github.workspace }}/release.keystore" >> $GITHUB_ENV
           echo "Keystore created successfully."
@@ -122,8 +122,8 @@ jobs:
             $SDK_BT/apksigner sign \
               --ks release.keystore \
               --ks-key-alias pdftoocr \
-              --ks-pass pass:pdfocr2024 \
-              --key-pass pass:pdfocr2024 \
+              --ks-pass pass:"${{ secrets.KEYSTORE_PASSWORD || 'pdfocr2024' }}" \
+              --key-pass pass:"${{ secrets.KEYSTORE_PASSWORD || 'pdfocr2024' }}" \
               --out "$SIGNED" \
               "$ALIGNED"
 
@@ -138,8 +138,8 @@ jobs:
               SIGNED="${AAB/.aab/-signed.aab}"
               jarsigner -verbose \
                 -keystore release.keystore \
-                -storepass pdfocr2024 \
-                -keypass pdfocr2024 \
+                -storepass "${{ secrets.KEYSTORE_PASSWORD || 'pdfocr2024' }}" \
+                -keypass "${{ secrets.KEYSTORE_PASSWORD || 'pdfocr2024' }}" \
                 -signedjar "$SIGNED" \
                 "$AAB" pdftoocr
               echo "Signed AAB size: $(du -h "$SIGNED" | cut -f1)"

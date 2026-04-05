@@ -1,0 +1,14 @@
+721: self._set_status("কনভার্ট করতে প্রস্তুত", C_TEXT)
+763: self.status_label.text = "[color=ff6666]প্রথমে একটি PDF ফাইল নির্বাচন করুন[/color]"
+770: self.status_label.text = "[color=ffbb33]প্রক্রিয়াকরণ চলছে, অপেক্ষা করুন[/color]"
+793: self.status_label.text = "শুরু হচ্ছে..."
+811: msg = f"পৃষ্ঠা {current + 1} / {total} প্রক্রিয়া হচ্ছে..."
+837: self.status_label.text = "রূপান্তর সফলভাবে সম্পন্ন!"
+843: "[b][color=22cc66]সম্পন্ন![/color][/b]\n\n"
+844: f"[b]সংরক্ষিত:[/b]\n{output_path}"
+849: self.status_label.text = f"ব্যর্থ: {message}"
+855: self.status_label.text = "ফাইল পাওয়া যায়নি"
+871: self.status_label.text = "ফাইল বিদ্যমান নেই"
+881: chooser = Intent.createChooser(intent, "DOCX ফাইল খুলুন")
+886: self.status_label.text = f"শেয়ার ব্যর্থ: {err_msg}"
+898: self.status_label.text = f"ফাইল খুলতে ব্যর্থ: {str(e)[:60]}"

@@ -61,6 +61,7 @@ from kivy.clock import Clock
 from kivy.metrics import dp, sp
 import threading
 import json
+import logging
 from pathlib import Path
 
 # ── Bengali font registration ─────────────────────────────────────────────────
@@ -176,11 +177,20 @@ class RoundedButton(Button):
                 pos=self.pos, size=self.size, radius=[self._radius]
             )
         self.bind(pos=self._update, size=self._update,
-                  on_press=self._on_press, on_release=self._on_release)
+                  on_press=self._on_press, on_release=self._on_release,
+                  disabled=self._on_disabled_change)
 
     def _update(self, *args):
         self._btn_rect.pos = self.pos
         self._btn_rect.size = self.size
+
+    def _on_disabled_change(self, instance, is_disabled):
+        if is_disabled:
+            self._btn_color.rgba = (*self._base_color[:3], 0.35)
+            self.color = (*self.color[:3], 0.4)
+        else:
+            self._btn_color.rgba = self._base_color
+            self.color = (*self.color[:3], 1.0)
 
     def _on_press(self, *args):
         # BUG-03 fix: preserve original alpha channel
@@ -223,9 +233,9 @@ class PDFToDocxConverter:
             ocr_results = ocr_pdf(pdf_path, progress_callback=progress_callback)
             doc = build_docx_from_ocr_results(ocr_results)
             doc.save(output_path)
-            return True, f"সফলভাবে রূপান্তর সম্পন্ন:\n{output_path}"
+            return True, f"Conversion successful:\n{output_path}"
         except Exception as e:
-            return False, f"ত্রুটি: {str(e)}"
+            return False, f"Error: {str(e)}"
 
 
 # ── Settings Popup ────────────────────────────────────────────────────────────
@@ -233,7 +243,7 @@ class PDFToDocxConverter:
 class SettingsPopup(Popup):
     def __init__(self, settings: dict, on_save_callback, **kwargs):
         super().__init__(
-            title="OCR সেটিংস",
+            title="OCR Settings",
             title_color=C_TEXT,
             separator_color=C_PRIMARY,
             background_color=C_SURFACE,
@@ -248,16 +258,16 @@ class SettingsPopup(Popup):
 
         # Mode selector
         mode_lbl = Label(
-            text="OCR মোড", color=C_TEXT_SUB, font_size=sp(12),
+            text="OCR Mode", color=C_TEXT_SUB, font_size=sp(12),
             halign='left', size_hint_y=None, height=dp(22),
         )
         mode_lbl.bind(size=mode_lbl.setter('text_size'))
         root.add_widget(mode_lbl)
 
         self._mode_spinner = Spinner(
-            text=("VL-1.5 সার্ভার (llama.cpp)" if settings["mode"] == "vl_server"
-                  else "Classic PP-OCRv4 বাংলা"),
-            values=("Classic PP-OCRv4 বাংলা", "VL-1.5 সার্ভার (llama.cpp)"),
+            text=("VL-1.5 Server (llama.cpp)" if settings["mode"] == "vl_server"
+                  else "Classic PP-OCRv4"),
+            values=("Classic PP-OCRv4", "VL-1.5 Server (llama.cpp)"),
             size_hint_y=None, height=dp(46),
             background_normal='', background_down='',
             background_color=C_SURFACE2,
@@ -268,7 +278,7 @@ class SettingsPopup(Popup):
 
         # Server URL
         self._url_lbl = Label(
-            text="llama.cpp সার্ভার URL", color=C_TEXT_SUB, font_size=sp(12),
+            text="llama.cpp Server URL", color=C_TEXT_SUB, font_size=sp(12),
             halign='left', size_hint_y=None, height=dp(22),
         )
         self._url_lbl.bind(size=self._url_lbl.setter('text_size'))
@@ -287,7 +297,7 @@ class SettingsPopup(Popup):
 
         # Test connection
         self._test_btn = RoundedButton(
-            text="সংযোগ পরীক্ষা করুন",
+            text="Test Connection",
             bg_color=C_PRIMARY_D,
             size_hint_y=None, height=dp(44),
             font_size=sp(14),
@@ -305,21 +315,21 @@ class SettingsPopup(Popup):
 
         # Info scroll
         info_text = (
-            "[b]VL-1.5 Android অফলাইন সেটআপ:[/b]\n\n"
-            "১. F-Droid থেকে [b]Termux[/b] ইনস্টল করুন\n"
-            "২. Termux-এ চালান:\n"
+            "[b]VL-1.5 Android Offline Setup:[/b]\n\n"
+            "1. Install [b]Termux[/b] from F-Droid\n"
+            "2. Run in Termux:\n"
             "   pkg install git cmake clang\n"
             "   git clone https://github.com/ggml-org/llama.cpp\n"
             "   cd llama.cpp && cmake -B build\n"
             "   cmake --build build -j$(nproc)\n"
-            "৩. GGUF মডেল ডাউনলোড (~৭০০MB):\n"
+            "3. Download GGUF models (~700MB):\n"
             "   python download_models.py --gguf\n"
-            "৪. সার্ভার চালু করুন:\n"
+            "4. Start server:\n"
             "   ./build/bin/llama-server \\\n"
             "     -m models/PaddleOCR-VL-1.5.gguf \\\n"
             "     --mmproj models/PaddleOCR-VL-1.5-mmproj.gguf \\\n"
             "     --port 8111 --temp 0\n"
-            "৫. এই অ্যাপে VL-1.5 মোড সিলেক্ট করুন"
+            "5. Select VL-1.5 mode in this app"
         )
         info_scroll = ScrollView(size_hint_y=1)
         info_lbl = Label(
@@ -336,9 +346,9 @@ class SettingsPopup(Popup):
 
         # Buttons
         btn_row = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(10))
-        save_btn = RoundedButton(text="সংরক্ষণ", bg_color=C_SUCCESS, font_size=sp(15))
+        save_btn = RoundedButton(text="Save", bg_color=C_SUCCESS, font_size=sp(15))
         save_btn.bind(on_press=self._save)
-        cancel_btn = RoundedButton(text="বাতিল", bg_color=C_ERROR, font_size=sp(15))
+        cancel_btn = RoundedButton(text="Cancel", bg_color=C_ERROR, font_size=sp(15))
         cancel_btn.bind(on_press=lambda x: self.dismiss())
         btn_row.add_widget(save_btn)
         btn_row.add_widget(cancel_btn)
@@ -359,20 +369,25 @@ class SettingsPopup(Popup):
 
     def _test_connection(self, btn):
         """BUG-01 fix: run connection test in a background thread to avoid UI freeze."""
-        self._test_result.text = "[color=888888]পরীক্ষা করা হচ্ছে...[/color]"
+        url = self._url_input.text.strip()
+        if not url.startswith("http://") and not url.startswith("https://"):
+            self._show_test_result(False, "URL অবশ্যই http:// বা https:// দিয়ে শুরু হতে হবে")
+            return
+
+        self._test_result.text = "[color=888888]Testing...[/color]"
 
         def _worker():
             from ocr_engine import test_llama_server
-            ok, msg = test_llama_server(self._url_input.text.strip())
+            ok, msg = test_llama_server(url)
             Clock.schedule_once(lambda dt: self._show_test_result(ok, msg), 0)
 
         threading.Thread(target=_worker, daemon=True).start()
 
     def _show_test_result(self, ok, msg):
         if ok:
-            self._test_result.text = f"[color=22cc66]সংযুক্ত: {msg}[/color]"
+            self._test_result.text = f"[color=22cc66]Connected: {msg}[/color]"
         else:
-            self._test_result.text = f"[color=ff4444]ব্যর্থ: {msg}[/color]"
+            self._test_result.text = f"[color=ff4444]Failed: {msg}[/color]"
 
     def _save(self, btn):
         is_vl = "VL-1.5" in self._mode_spinner.text
@@ -387,7 +402,7 @@ class SettingsPopup(Popup):
 class FilePicker(Popup):
     def __init__(self, initial_path, on_select, **kwargs):
         super().__init__(
-            title="PDF ফাইল নির্বাচন করুন",
+            title="Select PDF File",
             title_color=C_TEXT,
             separator_color=C_PRIMARY,
             background_color=C_SURFACE,
@@ -397,6 +412,25 @@ class FilePicker(Popup):
         )
         self._on_select = on_select
         root = BoxLayout(orientation='vertical', padding=dp(8), spacing=dp(8))
+
+        # Adding an explicit Up navigation button + path label
+        path_row = BoxLayout(size_hint_y=None, height=dp(38), spacing=dp(8))
+        up_btn = RoundedButton(
+            text="Up (..)", bg_color=C_SURFACE2, size_hint_x=0.25, font_size=sp(13), radius=dp(6)
+        )
+        up_btn.bind(on_press=self._go_up)
+        
+        self._path_label = Label(
+            text=initial_path,
+            color=C_TEXT_SUB, font_size=sp(11),
+            size_hint_y=1, size_hint_x=0.75,
+            halign='left', valign='middle'
+        )
+        self._path_label.bind(size=self._path_label.setter('text_size'))
+        
+        path_row.add_widget(up_btn)
+        path_row.add_widget(self._path_label)
+        root.add_widget(path_row)
 
         self._fc = FileChooserListView(
             path=initial_path,
@@ -410,30 +444,26 @@ class FilePicker(Popup):
             self._fc.font_name = _FONT_PATH
         root.add_widget(self._fc)
 
-        # Current path display — BUG-06 fix: use dynamic text_size binding
-        self._path_label = Label(
-            text=initial_path,
-            color=C_TEXT_SUB, font_size=sp(11),
-            size_hint_y=None, height=dp(22),
-            halign='left',
-        )
-        self._path_label.bind(size=self._path_label.setter('text_size'))
         self._fc.bind(path=lambda inst, val: setattr(self._path_label, 'text', val))
-        root.add_widget(self._path_label)
 
         btn_row = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(10))
         ok_btn = RoundedButton(
-            text="নির্বাচন করুন", bg_color=C_SUCCESS, font_size=sp(15),
+            text="Select", bg_color=C_SUCCESS, font_size=sp(15),
         )
         ok_btn.bind(on_press=self._confirm)
         cancel_btn = RoundedButton(
-            text="বাতিল", bg_color=C_SURFACE2, font_size=sp(15),
+            text="Cancel", bg_color=C_SURFACE2, font_size=sp(15),
         )
         cancel_btn.bind(on_press=lambda x: self.dismiss())
         btn_row.add_widget(ok_btn)
         btn_row.add_widget(cancel_btn)
         root.add_widget(btn_row)
         self.content = root
+
+    def _go_up(self, btn):
+        parent = os.path.dirname(self._fc.path)
+        if parent and os.path.exists(parent):
+            self._fc.path = parent
 
     def _confirm(self, btn):
         if self._fc.selection:
@@ -448,6 +478,7 @@ class PDFToDocxApp(App):
         super().__init__(**kwargs)
         self.converter = PDFToDocxConverter()
         self.selected_pdf: str | None = None
+        self._current_popup = None
         self._settings = load_settings()
         self._apply_ocr_settings()
 
@@ -468,11 +499,11 @@ class PDFToDocxApp(App):
                 from android import api_version  # type: ignore
                 if api_version >= 30:
                     perms.append(Permission.MANAGE_EXTERNAL_STORAGE)
-            except Exception:
-                pass
+            except Exception as e:
+                logging.warning(f"Could not check API version: {e}")
             request_permissions(perms)
-        except Exception:
-            pass
+        except Exception as e:
+            logging.warning(f"Failed to request permissions: {e}")
 
     def _apply_ocr_settings(self):
         try:
@@ -481,12 +512,13 @@ class PDFToDocxApp(App):
                 set_llama_server(self._settings.get("server_url", DEFAULT_SERVER_URL))
             else:
                 set_classic_mode()
-        except Exception:
-            pass
+        except Exception as e:
+            logging.warning(f"Error applying OCR settings: {e}")
 
     def build(self):
         self.title = "PDF to DOCX OCR"
         Window.clearcolor = C_BG
+        Window.bind(on_keyboard=self._on_keyboard)
 
         # Root scroll so it works on small screens
         root_scroll = ScrollView(do_scroll_x=False)
@@ -501,13 +533,13 @@ class PDFToDocxApp(App):
 
         # ── Header ──────────────────────────────────────────────────────────
         header = Card(bg_color=C_SURFACE, radius=dp(16),
-                      size_hint_y=None, height=dp(88))
+                      size_hint_y=None, height=dp(96))
         header_inner = BoxLayout(
             orientation='vertical', padding=dp(14), spacing=dp(4),
         )
 
         title_lbl = Label(
-            text="PDF to DOCX রূপান্তরণ",
+            text="PDF to DOCX Converter",
             color=C_TEXT, bold=True,
             font_size=sp(20), halign='center',
             size_hint_y=None, height=dp(36),
@@ -535,7 +567,7 @@ class PDFToDocxApp(App):
         # BUG-11 fix: add text_size binding for halign to work
         file_title_row = BoxLayout(size_hint_y=None, height=dp(22))
         file_section_lbl = Label(
-            text="ফাইল নির্বাচন", color=C_TEXT_SUB,
+            text="File Selection", color=C_TEXT_SUB,
             font_size=sp(12), halign='left',
             size_hint_x=1,
         )
@@ -544,16 +576,17 @@ class PDFToDocxApp(App):
         file_inner.add_widget(file_title_row)
 
         self.file_name_label = Label(
-            text="কোনো ফাইল নির্বাচিত নেই",
+            text="No file selected",
             markup=True, color=C_TEXT,
             font_size=sp(14), halign='left', valign='middle',
             size_hint_y=None, height=dp(36),
+            shorten=True, shorten_from='center',
         )
         self.file_name_label.bind(size=self.file_name_label.setter('text_size'))
         file_inner.add_widget(self.file_name_label)
 
         pick_btn = RoundedButton(
-            text="PDF ফাইল বেছে নিন",
+            text="Choose PDF File",
             bg_color=C_PRIMARY, font_size=sp(15),
             size_hint_y=None, height=dp(46),
         )
@@ -568,14 +601,14 @@ class PDFToDocxApp(App):
                              size_hint_y=None, height=dp(52))
 
         self.convert_btn = RoundedButton(
-            text="রূপান্তর শুরু করুন",
+            text="Start Conversion",
             bg_color=C_SUCCESS, font_size=sp(15),
         )
         self.convert_btn.bind(on_press=self.start_conversion)
         btn_row.add_widget(self.convert_btn)
 
         settings_btn = RoundedButton(
-            text="সেটিংস",
+            text="Settings",
             bg_color=C_SURFACE2, font_size=sp(15),
         )
         settings_btn.bind(on_press=self._show_settings)
@@ -589,7 +622,7 @@ class PDFToDocxApp(App):
         status_inner = BoxLayout(orientation='vertical', padding=dp(14), spacing=dp(6))
 
         self.status_label = Label(
-            text="রূপান্তর করতে একটি PDF ফাইল নির্বাচন করুন",
+            text="Select a PDF file to begin conversion",
             markup=True, color=C_TEXT,
             font_size=sp(14), halign='center', valign='middle',
             size_hint_y=None, height=dp(42),
@@ -607,7 +640,7 @@ class PDFToDocxApp(App):
 
         # ── Share / open output button (hidden initially) ────────────────────
         self.share_btn = RoundedButton(
-            text="ফাইল শেয়ার / খুলুন",
+            text="Share / Open File",
             bg_color=C_PRIMARY, font_size=sp(15),
             size_hint_y=None, height=dp(50),
             opacity=0, disabled=True,
@@ -654,25 +687,25 @@ class PDFToDocxApp(App):
         mode = self._settings.get("mode", "classic")
         if mode == "vl_server":
             return "[color=6680ee]PaddleOCR-VL-1.5  •  llama.cpp[/color]"
-        return "[color=22cc66]Classic PP-OCRv4  •  বাংলা  •  অফলাইন[/color]"
+        return "[color=22cc66]Classic PP-OCRv4  •  Offline[/color]"
 
     def _info_text(self) -> str:
         mode = self._settings.get("mode", "classic")
         if mode == "vl_server":
             return (
-                "[b][color=e0e0ff]VL-1.5 মোড সক্রিয়[/color][/b]\n\n"
-                "• ৯৪.৫% SOTA নির্ভুলতা\n"
-                "• বাংলা টেবিল ও সূত্র চেনে\n"
-                "• জটিল PDF সম্পূর্ণ পড়তে পারে\n"
-                "• সংযোগ পরীক্ষার জন্য সেটিংসে যান"
+                "[b][color=e0e0ff]VL-1.5 Mode Active[/color][/b]\n\n"
+                "• 94.5% SOTA accuracy\n"
+                "• Supports complex tables & formulas\n"
+                "• Recognizes complex multi-lingual layouts\n"
+                "• Go to settings to test connection"
             )
         return (
-            "[b][color=e0e0ff]Classic PP-OCRv4 মোড[/color][/b]\n\n"
-            "• সম্পূর্ণ অফলাইনে কাজ করে\n"
-            "• PP-OCRv4 Bengali মডেল ব্যবহার হচ্ছে\n\n"
-            "[b]উন্নত OCR চাইলে:[/b]\n"
-            "সেটিংসে যান - VL-1.5 মোড সিলেক্ট করুন\n"
-            "- Termux-এ llama.cpp ও GGUF মডেল সেটআপ করুন"
+            "[b][color=e0e0ff]Classic PP-OCRv4 Mode[/color][/b]\n\n"
+            "• Works completely offline\n"
+            "• Uses standard PP-OCRv4 model\n\n"
+            "[b]For higher accuracy:[/b]\n"
+            "Go to Settings - Select VL-1.5 Server\n"
+            "- Setup local llama.cpp GGUF server via Termux"
         )
 
     # ── Actions ───────────────────────────────────────────────────────────────
@@ -685,16 +718,18 @@ class PDFToDocxApp(App):
         return os.path.expanduser("~")
 
     def _show_file_picker(self, instance):
-        FilePicker(
+        self._current_popup = FilePicker(
             initial_path=self._get_initial_path(),
             on_select=self._on_file_selected,
-        ).open()
+        )
+        self._current_popup.bind(on_dismiss=self._clear_popup)
+        self._current_popup.open()
 
     def _on_file_selected(self, path: str):
         self.selected_pdf = path
         name = Path(path).name
         self.file_name_label.text = f"[b]{name}[/b]"
-        self._set_status("কনভার্ট করতে প্রস্তুত", C_TEXT)
+        self._set_status("Ready to convert", C_TEXT)
         self.share_btn.opacity = 0
         self.share_btn.disabled = True
         self._output_path = None
@@ -707,7 +742,20 @@ class PDFToDocxApp(App):
             self._apply_ocr_settings()
             Clock.schedule_once(lambda dt: self._refresh_ui(), 0)
 
-        SettingsPopup(self._settings, on_save_callback=on_save).open()
+        self._current_popup = SettingsPopup(self._settings, on_save_callback=on_save)
+        self._current_popup.bind(on_dismiss=self._clear_popup)
+        self._current_popup.open()
+
+    def _clear_popup(self, instance):
+        self._current_popup = None
+
+    def _on_keyboard(self, window, key, *largs):
+        # 27 is ESC / Android Back button
+        if key == 27:
+            if self._current_popup:
+                self._current_popup.dismiss()
+                return True
+        return False
 
     def _refresh_ui(self):
         self.engine_badge.text = self._engine_badge_text()
@@ -736,14 +784,14 @@ class PDFToDocxApp(App):
 
     def start_conversion(self, instance):
         if not self.selected_pdf:
-            self.status_label.text = "[color=ff6666]প্রথমে একটি PDF ফাইল নির্বাচন করুন[/color]"
+            self.status_label.text = "[color=ff6666]Please select a PDF file first[/color]"
             self.status_label.color = C_ERROR
             return
 
         # BUG-02 fix: thread-safe check for is_processing
         with self.converter._lock:
             if self.converter.is_processing:
-                self.status_label.text = "[color=ffbb33]প্রক্রিয়াকরণ চলছে, অপেক্ষা করুন[/color]"
+                self.status_label.text = "[color=ffbb33]Processing is ongoing, please wait[/color]"
                 return
             self.converter.is_processing = True
 
@@ -766,7 +814,7 @@ class PDFToDocxApp(App):
         output_path = self._get_unique_output_path(output_dir, pdf_path.stem)
         self._output_path = output_path
 
-        self.status_label.text = "শুরু হচ্ছে..."
+        self.status_label.text = "Starting..."
         self.status_label.color = C_TEXT
         self.progress_bar.value = 3
         self.share_btn.opacity = 0
@@ -784,7 +832,7 @@ class PDFToDocxApp(App):
         try:
             def progress_callback(current, total):
                 pct = int(((current + 1) / total) * 90) + 5
-                msg = f"পৃষ্ঠা {current + 1} / {total} প্রক্রিয়া হচ্ছে..."
+                msg = f"Processing page {current + 1} of {total}..."
                 # BUG-13 fix: default arg capture to avoid late binding
                 Clock.schedule_once(lambda dt, p=pct, m=msg: self._update_progress(p, m), 0)
 
@@ -810,25 +858,25 @@ class PDFToDocxApp(App):
 
     def _on_success(self, output_path: str):
         self.progress_bar.value = 100
-        self.status_label.text = "রূপান্তর সফলভাবে সম্পন্ন!"
+        self.status_label.text = "Conversion completed successfully!"
         self.status_label.color = C_SUCCESS
         self.convert_btn.disabled = False
         self.share_btn.opacity = 1
         self.share_btn.disabled = False
         self.info_label.text = (
-            "[b][color=22cc66]সম্পন্ন![/color][/b]\n\n"
-            f"[b]সংরক্ষিত:[/b]\n{output_path}"
+            "[b][color=22cc66]Done![/color][/b]\n\n"
+            f"[b]Saved at:[/b]\n{output_path}"
         )
 
     def _on_failure(self, message: str):
         self.progress_bar.value = 0
-        self.status_label.text = f"ব্যর্থ: {message}"
+        self.status_label.text = f"Failed: {message}"
         self.status_label.color = C_ERROR
         self.convert_btn.disabled = False
 
     def _share_output(self, instance):
         if not self._output_path or not os.path.exists(self._output_path):
-            self.status_label.text = "ফাইল পাওয়া যায়নি"
+            self.status_label.text = "File not found"
             self.status_label.color = C_ERROR
             return
         if _IS_ANDROID:
@@ -844,7 +892,7 @@ class PDFToDocxApp(App):
 
                 output_file = File(self._output_path)
                 if not output_file.exists():
-                    self.status_label.text = "ফাইল বিদ্যমান নেই"
+                    self.status_label.text = "File does not exist"
                     self.status_label.color = C_ERROR
                     return
 
@@ -854,12 +902,12 @@ class PDFToDocxApp(App):
                 intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 
-                chooser = Intent.createChooser(intent, "DOCX ফাইল খুলুন")
+                chooser = Intent.createChooser(intent, "Open DOCX File")
                 chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 context.startActivity(chooser)
             except Exception as e:
                 err_msg = str(e)[:60]
-                self.status_label.text = f"শেয়ার ব্যর্থ: {err_msg}"
+                self.status_label.text = f"Share failed: {err_msg}"
                 self.status_label.color = C_ERROR
         else:
             import subprocess
@@ -871,7 +919,7 @@ class PDFToDocxApp(App):
                 elif sys.platform == 'win32':
                     os.startfile(self._output_path)
             except Exception as e:
-                self.status_label.text = f"ফাইল খুলতে ব্যর্থ: {str(e)[:60]}"
+                self.status_label.text = f"Failed to open/share: {str(e)[:60]}"
                 self.status_label.color = C_ERROR
 
 

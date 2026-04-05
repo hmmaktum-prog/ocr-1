@@ -6,6 +6,7 @@ import threading
 import tempfile
 from pathlib import Path
 from flask import Flask, render_template_string, request, jsonify, send_file
+from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 
@@ -46,16 +47,19 @@ def _cleanup_old_jobs():
             try:
                 if os.path.exists(pdf):
                     os.unlink(pdf)
-            except OSError:
+            except (OSError, FileNotFoundError):
                 pass
         # Remove output files older than max age
         try:
             for fname in os.listdir(OUTPUT_FOLDER):
                 fpath = os.path.join(OUTPUT_FOLDER, fname)
-                if os.path.isfile(fpath):
-                    age = now - os.path.getmtime(fpath)
-                    if age > JOB_MAX_AGE_SECONDS:
-                        os.unlink(fpath)
+                try:
+                    if os.path.isfile(fpath):
+                        age = now - os.path.getmtime(fpath)
+                        if age > JOB_MAX_AGE_SECONDS:
+                            os.unlink(fpath)
+                except (OSError, FileNotFoundError):
+                    pass
         except OSError:
             pass
 
@@ -254,6 +258,12 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
         /* ── Divider ── */
         hr { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
+
+        @media (max-width: 600px) {
+            .container { padding: 24px 20px; }
+            .header h1 { font-size: 1.5rem; }
+            .upload-area { padding: 24px 16px; }
+        }
     </style>
 </head>
 <body>
@@ -379,10 +389,12 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     }
 
     function pollStatus(id) {
+        let errorCount = 0;
         const iv = setInterval(async () => {
             try {
                 const res = await fetch('/status/' + id);
                 const data = await res.json();
+                errorCount = 0;
                 if (data.progress != null)
                     document.getElementById('progressFill').style.width = data.progress + '%';
                 if (data.message)
@@ -398,8 +410,12 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     document.getElementById('convertBtn').disabled = false;
                 }
             } catch (err) {
-                clearInterval(iv);
-                setStatus('স্ট্যাটাস চেক করতে ব্যর্থ', 'error');
+                errorCount++;
+                if (errorCount > 3) {
+                    clearInterval(iv);
+                    setStatus('ইন্টারনেট সংযোগ নেই বা সার্ভার বন্ধ', 'error');
+                    document.getElementById('convertBtn').disabled = false;
+                }
             }
         }, 2000);
     }
@@ -505,7 +521,9 @@ def convert():
     job_id = str(uuid.uuid4())[:8]
     pdf_path = os.path.join(UPLOAD_FOLDER, f'{job_id}.pdf')
 
-    safe_stem = "".join(c if c.isalnum() or c in (' ', '_', '-') else '_' for c in Path(file.filename).stem)
+    safe_stem = secure_filename(Path(file.filename).stem)
+    if not safe_stem:
+        safe_stem = "pdf_file"
     safe_stem = safe_stem[:100]
     output_filename = f'{safe_stem}_converted_{job_id}.docx'
     output_path = os.path.join(OUTPUT_FOLDER, output_filename)
