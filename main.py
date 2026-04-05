@@ -153,10 +153,6 @@ C_TEXT_SUB  = (0.60, 0.62, 0.72, 1)       # subtitle gray
 C_DIVIDER   = (0.20, 0.21, 0.30, 1)       # subtle divider
 
 
-def rgba(color):
-    return color
-
-
 # ── UI helpers ────────────────────────────────────────────────────────────────
 
 class Card(RelativeLayout):
@@ -807,25 +803,38 @@ class PDFToDocxApp(App):
 
     def _share_output(self, instance):
         if not self._output_path or not os.path.exists(self._output_path):
+            self.status_label.text = "ফাইল পাওয়া যায়নি"
+            self.status_label.color = C_ERROR
             return
         if _IS_ANDROID:
             try:
                 from android import activity             # type: ignore
-                from jnius import autoclass              # type: ignore
+                from jnius import autoclass, cast        # type: ignore
                 Intent   = autoclass('android.content.Intent')
                 Uri      = autoclass('android.net.Uri')
                 File     = autoclass('java.io.File')
                 FileProvider = autoclass('androidx.core.content.FileProvider')
                 context  = activity._activity
                 pkg      = context.getPackageName()
-                f = File(self._output_path)
-                uri = FileProvider.getUriForFile(context, f"{pkg}.fileprovider", f)
+
+                output_file = File(self._output_path)
+                if not output_file.exists():
+                    self.status_label.text = "ফাইল বিদ্যমান নেই"
+                    self.status_label.color = C_ERROR
+                    return
+
+                uri = FileProvider.getUriForFile(context, f"{pkg}.fileprovider", output_file)
                 intent = Intent(Intent.ACTION_VIEW)
                 intent.setDataAndType(uri, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
                 intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                activity._activity.startActivity(intent)
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+
+                chooser = Intent.createChooser(intent, "DOCX ফাইল খুলুন")
+                chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(chooser)
             except Exception as e:
                 self.status_label.text = f"শেয়ার ব্যর্থ: {str(e)[:60]}"
+                self.status_label.color = C_ERROR
         else:
             import subprocess
             try:
@@ -835,8 +844,9 @@ class PDFToDocxApp(App):
                     subprocess.Popen(['open', self._output_path])
                 elif sys.platform == 'win32':
                     os.startfile(self._output_path)
-            except Exception:
-                pass
+            except Exception as e:
+                self.status_label.text = f"ফাইল খুলতে ব্যর্থ: {str(e)[:60]}"
+                self.status_label.color = C_ERROR
 
 
 if __name__ == "__main__":

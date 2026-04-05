@@ -417,20 +417,29 @@ def convert():
     if not file.filename or not file.filename.lower().endswith('.pdf'):
         return jsonify({'success': False, 'error': 'শুধুমাত্র PDF ফাইল সমর্থিত'})
 
-    file.seek(0, 2)
-    file_size_mb = file.tell() / (1024 * 1024)
-    file.seek(0)
+    try:
+        file.seek(0, 2)
+        file_size_mb = file.tell() / (1024 * 1024)
+        file.seek(0)
+    except Exception:
+        return jsonify({'success': False, 'error': 'ফাইল সাইজ নির্ধারণ করতে ব্যর্থ'})
+
     if file_size_mb > MAX_UPLOAD_SIZE_MB:
         return jsonify({'success': False,
                         'error': f'ফাইলটি খুব বড়। সর্বোচ্চ {MAX_UPLOAD_SIZE_MB}MB।'})
 
     job_id = str(uuid.uuid4())[:8]
     pdf_path = os.path.join(UPLOAD_FOLDER, f'{job_id}.pdf')
-    stem = Path(file.filename).stem
-    output_filename = f'{stem}_converted_{job_id}.docx'
+
+    safe_stem = "".join(c if c.isalnum() or c in (' ', '_', '-') else '_' for c in Path(file.filename).stem)
+    safe_stem = safe_stem[:100]
+    output_filename = f'{safe_stem}_converted_{job_id}.docx'
     output_path = os.path.join(OUTPUT_FOLDER, output_filename)
 
-    file.save(pdf_path)
+    try:
+        file.save(pdf_path)
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'ফাইল সংরক্ষণ ব্যর্থ: {str(e)}'})
 
     with conversion_lock:
         conversion_status[job_id] = {'status': 'running', 'progress': 3, 'message': 'শুরু হচ্ছে…'}
@@ -454,9 +463,18 @@ def status(job_id):
 @app.route('/download/<filename>')
 def download(filename):
     safe_filename = Path(filename).name
+
+    if '..' in filename or '/' in filename or '\\' in filename:
+        return 'অবৈধ ফাইলের নাম', 400
+
     file_path = os.path.join(OUTPUT_FOLDER, safe_filename)
+
     if not os.path.exists(file_path):
         return 'ফাইল পাওয়া যায়নি', 404
+
+    if not file_path.startswith(OUTPUT_FOLDER):
+        return 'অননুমোদিত অ্যাক্সেস', 403
+
     return send_file(file_path, as_attachment=True, download_name=safe_filename)
 
 

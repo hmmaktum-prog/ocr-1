@@ -10,7 +10,7 @@ source.exclude_dirs = .git,.buildozer,.pythonlibs,.local,.github,models,__pycach
 
 version = 1.2.0
 
-requirements = python3,kivy==2.3.0,pillow,python-docx,numpy,pymupdf
+requirements = python3,kivy==2.3.0,pillow,python-docx,numpy,pymupdf,opencv-python-headless,shapely,pyclipper,lxml
 
 orientation = portrait
 fullscreen = 0
@@ -27,6 +27,10 @@ android.release_artifact = apk
 # Allow cleartext HTTP for llama.cpp localhost server
 android.manifest.uses_permission = android.permission.INTERNET
 android.manifest.application_attribs = android:usesCleartextTraffic="true"
+
+# FileProvider configuration for sharing DOCX files
+android.add_src = android_config
+android.gradle_dependencies = androidx.core:core:1.6.0
 
 p4a.bootstrap = sdl2
 

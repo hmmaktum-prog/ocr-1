@@ -18,6 +18,7 @@ import sys
 import tempfile
 import logging
 from pathlib import Path
+from typing import Tuple, List
 
 logger = logging.getLogger(__name__)
 
@@ -156,7 +157,7 @@ def _get_vl_pipeline():
 # llama-cpp-server connectivity check
 # ---------------------------------------------------------------------------
 
-def test_llama_server(url: str = None) -> tuple[bool, str]:
+def test_llama_server(url: str = None) -> Tuple[bool, str]:
     """
     Test connection to a llama-cpp-server.
     Returns (success: bool, message: str).
@@ -423,7 +424,7 @@ def _ocr_image_via_llama_direct(img_bytes: bytes, server_url: str, task: str = "
         ) from exc
 
 
-def _pdf_to_images(pdf_path: str, dpi: int = 150) -> list:
+def _pdf_to_images(pdf_path: str, dpi: int = 150) -> List:
     """Render PDF pages to PIL Images using PyMuPDF or pdf2image."""
     images = []
 
@@ -509,7 +510,7 @@ def ocr_image_bytes(img_bytes: bytes) -> str:
     return ""
 
 
-def ocr_pdf(pdf_path: str, progress_callback=None) -> list:
+def ocr_pdf(pdf_path: str, progress_callback=None) -> List:
     """
     Run OCR on a PDF file.
     Returns list of (page_num, markdown_text) tuples.
@@ -592,7 +593,7 @@ def ocr_pdf(pdf_path: str, progress_callback=None) -> list:
     return results
 
 
-def build_docx_from_ocr_results(ocr_results: list):
+def build_docx_from_ocr_results(ocr_results: List):
     """Convert list of (page_num, markdown_text) into a python-docx Document."""
     from docx import Document
 

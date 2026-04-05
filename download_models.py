@@ -49,9 +49,9 @@ def _progress_hook(block, block_size, total):
 
 def _download(url: str, dest: Path, desc: str = ""):
     if dest.exists() and dest.stat().st_size > 1024:
-        logger.info("이미 캐시됨 (skipped): %s", dest.name)
+        logger.info("ইতিমধ্যে ক্যাশ আছে (skipped): %s", dest.name)
         return
-    logger.info("다운로드 중: %s → %s", desc or url.split("/")[-1], dest.name)
+    logger.info("ডাউনলোড হচ্ছে: %s → %s", desc or url.split("/")[-1], dest.name)
     try:
         urllib.request.urlretrieve(url, dest, _progress_hook)
         print()
@@ -63,9 +63,9 @@ def _download(url: str, dest: Path, desc: str = ""):
 
 def _extract_tar(tar_path: Path, dest_dir: Path, expected_name: str):
     if (dest_dir / expected_name).exists():
-        logger.info("Already extracted: %s", expected_name)
+        logger.info("ইতিমধ্যে এক্সট্র্যাক্ট হয়েছে: %s", expected_name)
         return
-    logger.info("압축 해제: %s", tar_path.name)
+    logger.info("এক্সট্র্যাক্ট হচ্ছে: %s", tar_path.name)
     with tarfile.open(tar_path, "r:gz") as tf:
         tf.extractall(dest_dir)
     # Rename if needed
