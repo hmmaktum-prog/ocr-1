@@ -1,0 +1,20 @@
+uploads = []
+outputs = []
+
+[[generated]]
+id = "rqjmg9Qt5WQehr9Qh4sR5"
+uri = "file://assets/images/icon.png"
+type = "image"
+title = "pdf to docx bengali app icon"
+
+[[generated]]
+id = "7rV930eYGIQfuLsagEOJ7"
+uri = "file://assets/images/favicon.png"
+type = "image"
+title = "pdf docx icon no text"
+
+[[generated]]
+id = "V2p6py-O2XVYk9EWxcUXB"
+uri = "file://assets/images/presplash.png"
+type = "image"
+title = "dark premium splash screen no text"

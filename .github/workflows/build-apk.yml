@@ -1,0 +1,170 @@
+name: Build Android APK
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Release APK with Buildozer
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y \
+            git \
+            zip \
+            unzip \
+            openjdk-17-jdk \
+            python3-pip \
+            python3-venv \
+            autoconf \
+            libtool \
+            pkg-config \
+            zlib1g-dev \
+            libncurses5-dev \
+            libncursesw5-dev \
+            cmake \
+            libffi-dev \
+            libssl-dev \
+            build-essential \
+            ccache \
+            libltdl-dev \
+            libsqlite3-dev
+
+      - name: Set up Java environment
+        run: |
+          echo "JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64" >> $GITHUB_ENV
+          echo "/usr/lib/jvm/java-17-openjdk-amd64/bin" >> $GITHUB_PATH
+
+      - name: Generate release keystore automatically
+        run: |
+          keytool -genkeypair -v \
+            -keystore release.keystore \
+            -alias pdftoocr \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=PDF to DOCX OCR, OU=App, O=OCR, L=Dhaka, S=Dhaka, C=BD" \
+            -storepass pdfocr2024 \
+            -keypass pdfocr2024 \
+            -storetype JKS
+          echo "KEYSTORE_PATH=${{ github.workspace }}/release.keystore" >> $GITHUB_ENV
+          echo "Keystore created successfully."
+
+      - name: Install Buildozer and Cython
+        run: |
+          pip install --upgrade pip setuptools wheel
+          pip install "Cython<3" buildozer
+
+      - name: Cache Buildozer global directory (Android SDK/NDK)
+        uses: actions/cache@v4
+        with:
+          path: ~/.buildozer
+          key: buildozer-global-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
+          restore-keys: |
+            buildozer-global-${{ runner.os }}-
+
+      - name: Cache .buildozer local directory
+        uses: actions/cache@v4
+        with:
+          path: .buildozer
+          key: buildozer-local-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
+          restore-keys: |
+            buildozer-local-${{ runner.os }}-
+
+      - name: Build Release APK
+        env:
+          JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
+          ANDROID_HOME: /home/runner/.buildozer/android/platform/android-sdk
+        run: |
+          set -o pipefail
+          buildozer -v android release 2>&1 | tee build.log
+
+      - name: Sign Release APK
+        run: |
+          BUILD_TOOLS=$(ls ~/.buildozer/android/platform/android-sdk/build-tools/ | sort -V | tail -1)
+          SDK_BT=~/.buildozer/android/platform/android-sdk/build-tools/$BUILD_TOOLS
+          echo "Using build-tools: $BUILD_TOOLS"
+
+          echo "=== Files in bin/ ==="
+          ls -la bin/ || echo "bin/ directory is empty or missing"
+
+          # Try unsigned APK first, then any release APK
+          UNSIGNED=$(find bin/ -name "*-release-unsigned.apk" | head -1)
+          if [ -z "$UNSIGNED" ]; then
+            UNSIGNED=$(find bin/ -name "*release*.apk" | head -1)
+          fi
+
+          if [ -n "$UNSIGNED" ]; then
+            echo "Signing APK: $UNSIGNED"
+            ALIGNED="${UNSIGNED/-unsigned.apk/-aligned.apk}"
+            $SDK_BT/zipalign -f -v 4 "$UNSIGNED" "$ALIGNED"
+
+            SIGNED="${UNSIGNED/-unsigned.apk/-signed.apk}"
+            $SDK_BT/apksigner sign \
+              --ks release.keystore \
+              --ks-key-alias pdftoocr \
+              --ks-pass pass:pdfocr2024 \
+              --key-pass pass:pdfocr2024 \
+              --out "$SIGNED" \
+              "$ALIGNED"
+
+            $SDK_BT/apksigner verify --verbose "$SIGNED"
+            echo "Signed APK size: $(du -h "$SIGNED" | cut -f1)"
+
+          else
+            # Fall back to AAB signing with jarsigner
+            AAB=$(find bin/ -name "*release*.aab" | head -1)
+            if [ -n "$AAB" ]; then
+              echo "Signing AAB: $AAB"
+              SIGNED="${AAB/.aab/-signed.aab}"
+              jarsigner -verbose \
+                -keystore release.keystore \
+                -storepass pdfocr2024 \
+                -keypass pdfocr2024 \
+                -signedjar "$SIGNED" \
+                "$AAB" pdftoocr
+              echo "Signed AAB size: $(du -h "$SIGNED" | cut -f1)"
+            else
+              echo "ERROR: No release APK or AAB found in bin/"
+              ls -la bin/ || true
+              exit 1
+            fi
+          fi
+
+      - name: Upload Release artifact
+        uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: pdf-to-docx-ocr-release-apk
+          path: |
+            bin/*-signed.apk
+            bin/*-signed.aab
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload build log on failure
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: build-log
+          path: build.log
+          retention-days: 7
