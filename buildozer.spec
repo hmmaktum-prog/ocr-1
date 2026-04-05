@@ -28,6 +28,10 @@ android.release_artifact = apk
 android.manifest.uses_permission = android.permission.INTERNET
 android.manifest.application_attribs = android:usesCleartextTraffic="true"
 
+# FileProvider configuration for sharing DOCX files
+android.add_src = android_config
+android.gradle_dependencies = androidx.core:core:1.6.0
+
 p4a.bootstrap = sdl2
 
 android.logcat_filters = *:S python:D

@@ -5,13 +5,15 @@ gunicorn
 # ── OCR & PDF Processing ──
 paddlepaddle>=3.2.1
 paddleocr[doc-parser]
-pymupdf
 pdf2image
 pillow
 python-docx
 numpy
 opencv-python-headless
 safetensors
+shapely
+pyclipper
+lxml
 
 # ── Mobile (Kivy) ──
 kivy

@@ -20,6 +20,7 @@ import sys
 import tempfile
 import logging
 from pathlib import Path
+from typing import Tuple, List
 
 logger = logging.getLogger(__name__)
 
@@ -607,7 +608,7 @@ def ocr_image_bytes(img_bytes: bytes) -> str:
     return ""
 
 
-def ocr_pdf(pdf_path: str, progress_callback=None) -> list:
+def ocr_pdf(pdf_path: str, progress_callback=None) -> List:
     """
     Run OCR on a PDF file.
     Returns list of (page_num, markdown_text) tuples.
@@ -695,7 +696,7 @@ def ocr_pdf(pdf_path: str, progress_callback=None) -> list:
     return results
 
 
-def build_docx_from_ocr_results(ocr_results: list):
+def build_docx_from_ocr_results(ocr_results: List):
     """Convert list of (page_num, markdown_text) into a python-docx Document."""
     from docx import Document
 
