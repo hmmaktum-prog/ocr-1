@@ -104,7 +104,7 @@ _SETTINGS_FILE = os.path.join(
     os.environ.get("PADDLEOCR_MODEL_DIR", "./models"),
     "settings.json"
 )
-DEFAULT_SERVER_URL = "http://localhost:8111/v1"
+DEFAULT_SERVER_URL = "http://127.0.0.1:8111/v1"
 
 
 def load_settings() -> dict:
@@ -315,21 +315,13 @@ class SettingsPopup(Popup):
 
         # Info scroll
         info_text = (
-            "[b]VL-1.5 Android Offline Setup:[/b]\n\n"
-            "1. Install [b]Termux[/b] from F-Droid\n"
-            "2. Run in Termux:\n"
-            "   pkg install git cmake clang\n"
-            "   git clone https://github.com/ggml-org/llama.cpp\n"
-            "   cd llama.cpp && cmake -B build\n"
-            "   cmake --build build -j$(nproc)\n"
-            "3. Download GGUF models (~700MB):\n"
-            "   python download_models.py --gguf\n"
-            "4. Start server:\n"
-            "   ./build/bin/llama-server \\\n"
-            "     -m models/PaddleOCR-VL-1.5.gguf \\\n"
-            "     --mmproj models/PaddleOCR-VL-1.5-mmproj.gguf \\\n"
-            "     --port 8111 --temp 0\n"
-            "5. Select VL-1.5 mode in this app"
+            "[b]VL-1.5 Fully Native Offline Mode:[/b]\n\n"
+            "This mode utilizes the embedded llama-server native binary\n"
+            "which runs entirely offline in the background.\n\n"
+            "• Works automatically, no setup required\n"
+            "• Connects securely at localhost\n"
+            "• High accuracy via 700MB GGUF models\n"
+            "Simply select VL-1.5 Server and convert your PDF!"
         )
         info_scroll = ScrollView(size_hint_y=1)
         info_lbl = Label(
@@ -495,12 +487,18 @@ class PDFToDocxApp(App):
                 Permission.WRITE_EXTERNAL_STORAGE,
             ]
             # Android 11+ (API 30+) needs MANAGE_EXTERNAL_STORAGE
+            # Android 13+ (API 33+) needs specific media permissions
             try:
                 from android import api_version  # type: ignore
-                if api_version >= 30:
+                if api_version >= 33:
+                    perms.extend([
+                        Permission.READ_MEDIA_IMAGES,
+                        Permission.READ_MEDIA_VIDEO,
+                    ])
+                elif api_version >= 30:
                     perms.append(Permission.MANAGE_EXTERNAL_STORAGE)
             except Exception as e:
-                logging.warning(f"Could not check API version: {e}")
+                logging.warning(f"Could not check API version or add media perms: {e}")
             request_permissions(perms)
         except Exception as e:
             logging.warning(f"Failed to request permissions: {e}")
@@ -697,15 +695,15 @@ class PDFToDocxApp(App):
                 "• 94.5% SOTA accuracy\n"
                 "• Supports complex tables & formulas\n"
                 "• Recognizes complex multi-lingual layouts\n"
-                "• Go to settings to test connection"
+                "• High accuracy offline parsing"
             )
         return (
             "[b][color=e0e0ff]Classic PP-OCRv4 Mode[/color][/b]\n\n"
             "• Works completely offline\n"
-            "• Uses standard PP-OCRv4 model\n\n"
-            "[b]For higher accuracy:[/b]\n"
+            "• Uses lightweight standard PP-OCRv4 model\n\n"
+            "[b]For higher accuracy (Offline):[/b]\n"
             "Go to Settings - Select VL-1.5 Server\n"
-            "- Setup local llama.cpp GGUF server via Termux"
+            "This will use the built-in native model engine."
         )
 
     # ── Actions ───────────────────────────────────────────────────────────────

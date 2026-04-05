@@ -4,9 +4,9 @@ package.name = pdftoDocxocr
 package.domain = org.pdftoocr
 
 source.dir = .
-source.include_exts = py,png,jpg,kv,atlas,ttf
-source.include_patterns = assets/fonts/*.ttf,assets/images/*.png
-source.exclude_dirs = .git,.buildozer,.pythonlibs,.local,.github,models,__pycache__,attached_assets,.bolt,.agents,.cache
+source.include_exts = py,png,jpg,kv,atlas,ttf,gguf,bin
+source.include_patterns = assets/fonts/*.ttf,assets/images/*.png,assets/models/*.gguf
+source.exclude_dirs = .git,.buildozer,.pythonlibs,.local,.github,__pycache__,attached_assets,.bolt,.agents,.cache,.replit
 
 version = 1.2.0
 
@@ -22,6 +22,7 @@ android.ndk = 25b
 android.accept_sdk_license = True
 android.archs = arm64-v8a
 android.enable_androidx = True
+android.add_libs_aarch64 = libs/libllama-server.so
 android.release_artifact = apk
 
 # Allow cleartext HTTP for llama.cpp localhost server only

@@ -90,6 +90,29 @@ jobs:
           restore-keys: |
             buildozer-local-${{ runner.os }}-
 
+      - name: Download Offline AI Models and Binaries
+        env:
+          # Authenticated GitHub API requests get 5000 req/hr (vs 60 anonymous)
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Set default socket timeout to prevent hanging downloads
+          export PYTHONHTTPSVERIFY=1
+          python -c "import socket; socket.setdefaulttimeout(120)"
+          python download_models.py --gguf
+
+      - name: Verify Downloaded Assets
+        run: |
+          echo "=== Verifying downloaded assets ==="
+          for f in libs/libllama-server.so assets/models/PaddleOCR-VL-1.5.gguf assets/models/PaddleOCR-VL-1.5-mmproj.gguf; do
+            if [ -f "$f" ]; then
+              echo "✓ $f ($(stat -c%s "$f") bytes)"
+            else
+              echo "✗ MISSING: $f"
+              exit 1
+            fi
+          done
+          echo "All assets verified."
+
       - name: Build Release APK
         env:
           JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64

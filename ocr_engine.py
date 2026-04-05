@@ -20,8 +20,11 @@ import sys
 import tempfile
 import logging
 import threading
+import subprocess
+import atexit
+import time
 from pathlib import Path
-from typing import Tuple, List
+from typing import Optional, Tuple, List
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +34,7 @@ MODEL_DIR = Path(os.environ.get("PADDLEOCR_MODEL_DIR", "./models"))
 GGUF_DIR = MODEL_DIR / "gguf"
 
 # Default llama-cpp-server URL (localhost on Android via Termux)
-DEFAULT_LLAMA_SERVER_URL = "http://localhost:8111/v1"
+DEFAULT_LLAMA_SERVER_URL = "http://127.0.0.1:8111/v1"
 
 _vl_pipeline = None
 _classic_ocr = None
@@ -75,9 +78,138 @@ def get_active_mode() -> str:
 # Pipeline initialisation
 # ---------------------------------------------------------------------------
 
+_llama_process = None
+
+def _stop_llama_server():
+    global _llama_process
+    if _llama_process is not None:
+        try:
+            _llama_process.terminate()
+            _llama_process.wait(timeout=3)
+        except Exception:
+            try:
+                _llama_process.kill()
+            except Exception:
+                pass
+        _llama_process = None
+
+atexit.register(_stop_llama_server)
+
+def _find_gguf_model(app_dir: str, filename: str) -> str:
+    """Search multiple candidate paths for a GGUF model file on Android."""
+    candidates = [
+        os.path.join(app_dir, 'assets', 'models', filename),
+        os.path.join(app_dir, 'models', filename),
+        os.path.join(app_dir, filename),
+    ]
+    # Also check nativeLibraryDir sibling paths
+    try:
+        from jnius import autoclass
+        ctx = autoclass('org.kivy.android.PythonActivity').mActivity
+        nld = ctx.getApplicationInfo().nativeLibraryDir
+        base = os.path.dirname(nld)  # e.g. /data/app/.../lib -> /data/app/...
+        candidates.append(os.path.join(base, 'assets', 'models', filename))
+    except Exception:
+        pass
+    for p in candidates:
+        if os.path.isfile(p):
+            return p
+    return candidates[0]  # return default for error reporting
+
+
+def start_embedded_llama_server():
+    """Start the packaged aarch64 llama-server binary if on Android."""
+    global _llama_process
+    if _llama_process is not None:
+        if _llama_process.poll() is None:
+            return True  # Already running — skip health poll
+        _llama_process = None
+
+    app_dir = os.environ.get('ANDROID_ARGUMENT')
+    if not app_dir:
+        return False  # Only try to run embedded binary on Android
+
+    try:
+        from jnius import autoclass
+        context = autoclass('org.kivy.android.PythonActivity').mActivity
+        app_info = context.getApplicationInfo()
+        native_lib_dir = app_info.nativeLibraryDir
+        server_bin = os.path.join(native_lib_dir, 'libllama-server.so')
+    except Exception as e:
+        logger.error("JNI call failed, using fallback path: %s", e)
+        server_bin = os.path.join(app_dir, 'assets', 'bins', 'llama-server')
+
+    main_gguf = _find_gguf_model(app_dir, 'PaddleOCR-VL-1.5.gguf')
+    mmproj_gguf = _find_gguf_model(app_dir, 'PaddleOCR-VL-1.5-mmproj.gguf')
+
+    if not os.path.isfile(server_bin):
+        logger.warning("llama-server binary not found: %s", server_bin)
+        return False
+    if not os.path.isfile(main_gguf):
+        logger.warning("GGUF model not found: %s", main_gguf)
+        return False
+
+    try:
+        # NOTE: os.chmod is intentionally omitted — on Android SELinux enforces
+        # execution context based on the file's label, not permission bits.
+        # The .so in nativeLibraryDir already has the correct SELinux context.
+        cmd = [
+            server_bin,
+            "-m", main_gguf,
+            "--mmproj", mmproj_gguf,
+            "--port", "8111",
+            "--host", "127.0.0.1",
+            "--temp", "0",
+            "--n-predict", "4096",
+            "-c", "4096"
+        ]
+        logger.info("Starting embedded llama-server: %s", server_bin)
+        _llama_process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+
+        # Wait for server to become healthy
+        # 90 seconds timeout for ~700MB models on mobile devices
+        import json
+        import urllib.request
+        health_url = "http://127.0.0.1:8111/health"
+        for i in range(90):
+            time.sleep(1)
+            if _llama_process.poll() is not None:
+                logger.error("llama-server process exited with code %s", _llama_process.returncode)
+                _llama_process = None
+                return False
+            try:
+                with urllib.request.urlopen(health_url, timeout=2) as resp:
+                    data = json.loads(resp.read().decode())
+                    status = data.get("status", "unknown")
+                    if status == "ok":
+                        logger.info("llama-server ready (status: ok) after %ds", i + 1)
+                        return True
+                    elif status == "loading model":
+                        logger.debug("llama-server loading model… (%ds)", i + 1)
+                        continue  # Keep waiting — model not ready yet
+                    else:
+                        logger.debug("llama-server status: %s (%ds)", status, i + 1)
+            except Exception:
+                continue
+
+        logger.warning("llama-server health check timed out after 90s.")
+        # Server process is running but model may still be loading—allow attempt
+        return True
+    except Exception as e:
+        logger.error("Failed to start embedded llama-server: %s", e)
+        return False
+
+
 def _init_vl_llama_pipeline():
     """VL-1.5 via llama-cpp-server (Android / offline)."""
     global _vl_pipeline
+    
+    start_embedded_llama_server()
+    
     if _vl_pipeline is not None:
         return _vl_pipeline
     try:
@@ -162,13 +294,14 @@ def _get_vl_pipeline():
 # llama-cpp-server connectivity check
 # ---------------------------------------------------------------------------
 
-def test_llama_server(url: str | None = None) -> tuple:
+def test_llama_server(url: Optional[str] = None) -> tuple:
     """
     Test connection to a llama-cpp-server.
     Returns (success: bool, message: str).
     """
     import urllib.request
     import urllib.error
+    import urllib.parse
     import json
 
     url = url or _config.llama_server_url
@@ -184,6 +317,7 @@ def test_llama_server(url: str | None = None) -> tuple:
     health_url = base + "/health"
 
     try:
+        start_embedded_llama_server() # Try to auto-start before performing check
         with urllib.request.urlopen(health_url, timeout=5) as resp:
             data = json.loads(resp.read().decode())
             status = data.get("status", "unknown")
@@ -297,28 +431,43 @@ def markdown_to_docx_page(doc, markdown_text: str, page_num: int):
 
     def flush_table():
         nonlocal in_table, table_rows
-        data_rows = [r for r in table_rows if not re.match(r"^\|[-| :]+\|$", r)]
+        # Filter out the divider row (e.g., |---|---|)
+        data_rows = [r for r in table_rows if not re.match(r"^\|[-| :]+\|$", r.strip())]
         if not data_rows:
             in_table = False
             table_rows = []
             return
+        
         parsed = []
         for row in data_rows:
+            # Handle rows that might not start/end with a pipe but are part of a table
             cells = [c.strip() for c in row.strip("|").split("|")]
             parsed.append(cells)
+            
         if not parsed:
             in_table = False
             table_rows = []
             return
+            
         col_count = max(len(r) for r in parsed)
+        if col_count == 0:
+            in_table = False
+            table_rows = []
+            return
+            
         t = doc.add_table(rows=len(parsed), cols=col_count)
         t.style = "Table Grid"
+        
         for r_idx, row in enumerate(parsed):
-            for c_idx, cell_text in enumerate(row):
-                if c_idx < col_count:
-                    clean = re.sub(r"\*\*([^*]+)\*\*", r"\1", cell_text)
-                    clean = re.sub(r"\*([^*]+)\*", r"\1", clean)
+            for c_idx in range(col_count):
+                if c_idx < len(row):
+                    cell_text = row[c_idx]
+                    # Clean inline markdown for docx cell text
+                    clean = strip_inline(cell_text)
                     t.cell(r_idx, c_idx).text = clean
+                else:
+                    t.cell(r_idx, c_idx).text = ""
+                    
         in_table = False
         table_rows = []
 
@@ -387,6 +536,10 @@ def _ocr_image_via_llama_direct(img_bytes: bytes, server_url: str, task: str = "
     import urllib.request
     import urllib.error
 
+    # NOTE: start_embedded_llama_server() is NOT called here to avoid
+    # redundant health-check polls on every page. It is called once
+    # during pipeline init in _init_vl_llama_pipeline().
+
     # Detect image type
     if img_bytes[:8] == b'\x89PNG\r\n\x1a\n':
         mime = "image/png"
@@ -401,7 +554,7 @@ def _ocr_image_via_llama_direct(img_bytes: bytes, server_url: str, task: str = "
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": f"{task}:"},
+                    {"type": "text", "text": f"{task}: Extract all text from this image and provide markdown output for Bengali language."},
                     {
                         "type": "image_url",
                         "image_url": {"url": f"data:{mime};base64,{b64_img}"},
@@ -428,7 +581,7 @@ def _ocr_image_via_llama_direct(img_bytes: bytes, server_url: str, task: str = "
     except urllib.error.URLError as exc:
         raise ConnectionError(
             f"llama.cpp সার্ভারে সংযোগ ব্যর্থ ({server_url}): {exc.reason}\n"
-            "Termux-এ 'bash ~/start_vl_server.sh' চালান।"
+            "অনুগ্রহ করে সেটিংস চেক করুন বা অ্যাপটি রিস্টার্ট করুন।"
         ) from exc
 
 
@@ -441,8 +594,9 @@ def _pdf_to_images(pdf_path: str, dpi: int = 150):
     try:
         from jnius import autoclass
         from PIL import Image
-        import io
-        
+        import io as _io
+
+        # Cache all JNI class lookups once (not per-page)
         File = autoclass('java.io.File')
         ParcelFileDescriptor = autoclass('android.os.ParcelFileDescriptor')
         PdfRenderer = autoclass('android.graphics.pdf.PdfRenderer')
@@ -455,34 +609,36 @@ def _pdf_to_images(pdf_path: str, dpi: int = 150):
         file_obj = File(str(pdf_path))
         pfd = ParcelFileDescriptor.open(file_obj, ParcelFileDescriptor.MODE_READ_ONLY)
         renderer = PdfRenderer(pfd)
-        
+
         page_count = renderer.getPageCount()
-        
+
         for i in range(page_count):
             page = renderer.openPage(i)
             # Default PDF dpi is 72. Scale up
             scale = dpi / 72.0
             width = int(page.getWidth() * scale)
             height = int(page.getHeight() * scale)
-            
+
             bitmap = Bitmap.createBitmap(width, height, BitmapConfig.ARGB_8888)
             bitmap.eraseColor(Color.WHITE)
-            
+
             page.render(bitmap, None, None, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-            
-            ByteBuffer = autoclass('java.nio.ByteBuffer')
-            buffer = ByteBuffer.allocate(bitmap.getByteCount())
-            bitmap.copyPixelsToBuffer(buffer)
-            
-            image_bytes = bytes(buffer.array())
-            img = Image.frombytes("RGBA", (width, height), image_bytes)
+
+            # Use Bitmap.compress(PNG) → ByteArrayOutputStream → bytes
+            # This avoids allocating a raw RGBA pixel buffer (~4x smaller)
+            baos = ByteArrayOutputStream()
+            bitmap.compress(CompressFormat.PNG, 100, baos)
+            png_bytes = bytes(baos.toByteArray())
+            baos.close()
+
+            img = Image.open(_io.BytesIO(png_bytes))
             img = img.convert("RGB")
             yield img
-            
+
             page.close()
             bitmap.recycle()
-            buffer.clear()
-            
+            del png_bytes  # free memory immediately
+
         renderer.close()
         pfd.close()
         return
@@ -506,8 +662,8 @@ def _pdf_to_images(pdf_path: str, dpi: int = 150):
         return
     except ImportError:
         pass
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("PyMuPDF PDF rendering failed: %s", exc)
 
     # Fallback: pdf2image (desktop only) — return generators
     try:
