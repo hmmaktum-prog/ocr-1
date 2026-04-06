@@ -4,7 +4,7 @@ expertMode = true
 
 [nix]
 channel = "stable-25_05"
-packages = ["SDL2", "SDL2_image", "SDL2_mixer", "SDL2_ttf", "cargo", "freetype", "gumbo", "harfbuzz", "jbig2dec", "lcms2", "libcxx", "libiconv", "libimagequant", "libjpeg", "libjpeg_turbo", "libtiff", "libwebp", "libxcrypt", "mtdev", "mupdf", "openjpeg", "openssl", "pkg-config", "poppler_utils", "rustc", "swig", "tcl", "tk", "xcbuild", "zlib"]
+packages = ["SDL2", "SDL2_image", "SDL2_mixer", "SDL2_ttf", "cargo", "freetype", "geos", "gumbo", "harfbuzz", "jbig2dec", "lcms2", "libcxx", "libiconv", "libimagequant", "libjpeg", "libjpeg_turbo", "libtiff", "libwebp", "libxcrypt", "mtdev", "mupdf", "openjpeg", "openssl", "pkg-config", "poppler_utils", "rustc", "swig", "tcl", "tk", "xcbuild", "xcodebuild", "zlib"]
 
 [workflows]
 runButton = "Project"

@@ -23,3 +23,14 @@ pyclipper
 python-docx
 shapely
 werkzeug
+flask
+gunicorn
+lxml
+numpy
+opencv-python-headless
+pdf2image
+pillow
+pyclipper
+python-docx
+shapely
+werkzeug
