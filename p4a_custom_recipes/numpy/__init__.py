@@ -5,12 +5,15 @@ pypi.python.org legacy URLs (https://pypi.python.org/packages/source/...)
 return HTTP 404 since ~2024. This recipe uses the stable GitHub release
 archive instead, which is guaranteed to be available.
 
-Also installs setuptools into hostpython3 before building compiled
-components, since Python 3.12+ and some hostpython3 builds no longer
-ship setuptools by default (numpy 1.x setup.py requires it).
+Also ensures setuptools is importable when numpy's setup.py runs
+build_ext with hostpython3 — we inject the system Python's site-packages
+via PYTHONPATH so that 'import setuptools' works even though hostpython3
+was built without pip/setuptools pre-installed.
 """
 
 import subprocess
+import sys
+import os
 from pythonforandroid.recipe import CompiledComponentsPythonRecipe
 
 
@@ -24,40 +27,29 @@ class NumpyRecipe(CompiledComponentsPythonRecipe):
     def get_recipe_env(self, arch):
         env = super().get_recipe_env(arch)
         env['NPY_NUM_BUILD_JOBS'] = '2'
+
+        # Inject the system Python's site-packages into PYTHONPATH so that
+        # numpy's setup.py can 'import setuptools' when build_ext runs via
+        # hostpython3 (which has no setuptools of its own).
+        try:
+            sys_site = subprocess.check_output(
+                [sys.executable, '-c',
+                 'import sysconfig; print(sysconfig.get_path("purelib"))'],
+                text=True
+            ).strip()
+            if sys_site and os.path.isdir(sys_site):
+                existing = env.get('PYTHONPATH', '')
+                env['PYTHONPATH'] = (
+                    sys_site + (':' + existing if existing else '')
+                )
+        except Exception as e:
+            print(f'[numpy recipe] Warning: could not set PYTHONPATH: {e}')
+
         return env
 
     def prebuild_arch(self, arch):
-        """Skip patch application — original patches are iOS-specific, not needed for Android."""
+        """Skip patch application — original patches are iOS-specific."""
         pass
-
-    def build_compiled_components(self, arch):
-        """Ensure setuptools is available in hostpython3 before building numpy extensions."""
-        hp = self.hostpython_location
-
-        # Step 1: Try to bootstrap pip into hostpython via ensurepip
-        subprocess.run([hp, '-m', 'ensurepip', '--upgrade'], capture_output=True)
-
-        # Step 2: Try installing setuptools using hostpython's pip
-        result = subprocess.run(
-            [hp, '-m', 'pip', 'install', '--quiet', 'setuptools'],
-            capture_output=True
-        )
-
-        # Step 3: If hostpython pip still unavailable, use system pip with --target
-        if result.returncode != 0:
-            try:
-                site_dir = subprocess.check_output(
-                    [hp, '-c', 'import site; print(site.getsitepackages()[0])'],
-                    text=True
-                ).strip()
-                if site_dir:
-                    subprocess.check_call(
-                        ['pip3', 'install', '--quiet', '--target', site_dir, 'setuptools']
-                    )
-            except Exception as e:
-                print(f'[numpy recipe] Warning: could not install setuptools: {e}')
-
-        super().build_compiled_components(arch)
 
 
 recipe = NumpyRecipe()
