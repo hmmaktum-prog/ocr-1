@@ -36,9 +36,6 @@ android.add_resources = android_config/res
 p4a.hook = p4a_hooks/hook.py
 p4a.local_recipes = ./p4a_custom_recipes
 
-# Allow cleartext HTTP for llama.cpp localhost server only
-android.manifest.uses_permission = android.permission.INTERNET
-
 # Gradle dependency for FileProvider
 android.gradle_dependencies = androidx.core:core:1.6.0
 
@@ -49,9 +46,6 @@ android.logcat_filters = *:S python:D
 icon.filename = %(source.dir)s/assets/images/icon.png
 presplash.filename = %(source.dir)s/assets/images/presplash.png
 android.presplash_color = #111120
-
-log_level = 2
-warn_on_root = 1
 
 [buildozer]
 log_level = 2

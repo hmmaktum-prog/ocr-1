@@ -571,7 +571,7 @@ def download(filename):
     if not os.path.exists(file_path):
         return 'ফাইল পাওয়া যায়নি', 404
 
-    if not file_path.startswith(OUTPUT_FOLDER):
+    if not os.path.abspath(file_path).startswith(os.path.abspath(OUTPUT_FOLDER) + os.sep):
         return 'অননুমোদিত অ্যাক্সেস', 403
 
     return send_file(file_path, as_attachment=True, download_name=safe_filename)

@@ -132,6 +132,8 @@ jobs:
           echo "Custom numpy recipe: $(ls p4a_custom_recipes/numpy/__init__.py)"
 
       - name: Download llama-server binary natively
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           python download_models.py --binary-only
 
@@ -176,6 +178,13 @@ jobs:
             echo "✓ p4a_custom_recipes/numpy/__init__.py"
           else
             echo "✗ MISSING: p4a_custom_recipes/numpy/__init__.py"
+            exit 1
+          fi
+          echo "=== Verifying llama-server binary ==="
+          if [ -f "libs/libllama-server.so" ]; then
+            echo "✓ libs/libllama-server.so ($(stat -c%s "libs/libllama-server.so") bytes)"
+          else
+            echo "✗ MISSING: libs/libllama-server.so — download step may have failed"
             exit 1
           fi
           echo "All project files verified."
