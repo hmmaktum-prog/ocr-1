@@ -349,6 +349,7 @@ def download_classic_models():
 def main():
     parser = argparse.ArgumentParser(description="PaddleOCR মডেল ডাউনলোড টুল")
     parser.add_argument("--gguf", action="store_true", help="GGUF মডেল এবং llama-server (Android/llama.cpp)")
+    parser.add_argument("--binary-only", action="store_true", help="শুধু llama-server বাইনারি ডাউনলোড করুন")
     parser.add_argument("--paddle", action="store_true", help="PaddlePaddle VL-1.5 মডেল")
     parser.add_argument("--classic", action="store_true", help="Classic PP-OCRv4 Bengali")
     parser.add_argument(
@@ -357,7 +358,7 @@ def main():
     )
     args = parser.parse_args()
 
-    download_all = not (args.gguf or args.paddle or args.classic)
+    download_all = not (args.gguf or args.binary_only or args.paddle or args.classic)
 
     print("\n" + "=" * 60)
     print("  PaddleOCR অফলাইন মডেল ডাউনলোড টুল")
@@ -365,8 +366,10 @@ def main():
 
     results = {}
 
-    if args.gguf or download_all:
+    if args.gguf or args.binary_only or download_all:
         results["llama-server Binary"] = download_llama_server_binary()
+        
+    if args.gguf or download_all:
         results["GGUF Models"] = download_gguf_models(args.quant)
 
     if args.paddle or download_all:

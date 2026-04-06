@@ -4,13 +4,15 @@ package.name = pdftoDocxocr
 package.domain = org.pdftoocr
 
 source.dir = .
-source.include_exts = py,png,jpg,kv,atlas,ttf,gguf,bin
-source.include_patterns = assets/fonts/*.ttf,assets/images/*.png,assets/models/*.gguf
-source.exclude_dirs = .git,.buildozer,.pythonlibs,.local,.github,__pycache__,attached_assets,.bolt,.agents,.cache,.replit
+source.include_exts = py,png,jpg,kv,atlas,ttf
+source.include_patterns = assets/fonts/*.ttf,assets/images/*.png
+source.exclude_dirs = .git,.buildozer,.pythonlibs,.local,.github,__pycache__,attached_assets,.bolt,.agents,.cache,.replit,run_logs,models,libs,p4a_hooks
 
 version = 1.2.0
 
-requirements = python3,kivy==2.3.0,pillow,python-docx,numpy
+# NOTE: python-docx removed — replaced by pure-Python docx_writer.py (no lxml needed)
+# NOTE: Models are NOT bundled in APK — downloaded on first run
+requirements = python3,kivy==2.3.0,pillow,numpy,pyjnius,android
 
 orientation = portrait
 fullscreen = 0
@@ -22,16 +24,21 @@ android.ndk = 25b
 android.accept_sdk_license = True
 android.archs = arm64-v8a
 android.enable_androidx = True
+# llama-server binary (~11MB) MUST be in APK for SELinux to allow execution
 android.add_libs_aarch64 = libs/libllama-server.so
-android.aapt_no_compress = gguf,so,bin
+android.aapt_no_compress = so
 android.release_artifact = apk
+
+# XML resources for network security config and FileProvider paths
+android.add_resources = android_config/res:res
+
+# FileProvider & manifest patching via p4a hook (not android.add_src)
+p4a.hook = p4a_hooks/hook.py
 
 # Allow cleartext HTTP for llama.cpp localhost server only
 android.manifest.uses_permission = android.permission.INTERNET
-android.manifest.application_attribs = android:networkSecurityConfig="@xml/network_security_config"
 
-# FileProvider configuration for sharing DOCX files
-android.add_src = android_config
+# Gradle dependency for FileProvider
 android.gradle_dependencies = androidx.core:core:1.6.0
 
 p4a.bootstrap = sdl2
@@ -41,10 +48,6 @@ android.logcat_filters = *:S python:D
 icon.filename = %(source.dir)s/assets/images/icon.png
 presplash.filename = %(source.dir)s/assets/images/presplash.png
 android.presplash_color = #111120
-# android.presplash_lottie is intentionally NOT set.
-# An empty android.presplash_lottie = causes SDL to resolve resource ID 0x00000000
-# (a non-existent Lottie animation), producing "Invalid resource ID 0x00000000"
-# in logcat. Leaving it absent forces the PNG presplash path only.
 
 log_level = 2
 warn_on_root = 1

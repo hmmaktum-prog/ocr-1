@@ -97,11 +97,19 @@ atexit.register(_stop_llama_server)
 
 def _find_gguf_model(app_dir: str, filename: str) -> str:
     """Search multiple candidate paths for a GGUF model file on Android."""
-    candidates = [
+    candidates = []
+    # Primary: user-downloadable models in app storage (runtime download)
+    try:
+        from android.storage import app_storage_path  # type: ignore
+        candidates.append(os.path.join(app_storage_path(), 'models', 'gguf', filename))
+    except Exception:
+        pass
+    # Fallback: bundled assets (if models were pre-packaged)
+    candidates.extend([
         os.path.join(app_dir, 'assets', 'models', filename),
         os.path.join(app_dir, 'models', filename),
         os.path.join(app_dir, filename),
-    ]
+    ])
     # Also check nativeLibraryDir sibling paths
     try:
         from jnius import autoclass
@@ -416,10 +424,10 @@ def _extract_text_from_classic_result(results) -> str:
 
 def markdown_to_docx_page(doc, markdown_text: str, page_num: int):
     """
-    Append a page's markdown content to a python-docx Document.
+    Append a page's markdown content to a DocxDocument.
     Handles: headings, bold/italic, tables, lists, horizontal rules.
     """
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx_writer import WD_ALIGN_PARAGRAPH
 
     if not markdown_text:
         doc.add_paragraph(f"[পৃষ্ঠা {page_num + 1}: কোনো টেক্সট পাওয়া যায়নি]")
@@ -868,10 +876,10 @@ def ocr_pdf(pdf_path: str, progress_callback=None) -> List:
 
 
 def build_docx_from_ocr_results(ocr_results: List):
-    """Convert list of (page_num, markdown_text) into a python-docx Document."""
-    from docx import Document
+    """Convert list of (page_num, markdown_text) into a DocxDocument."""
+    from docx_writer import DocxDocument
 
-    doc = Document()
+    doc = DocxDocument()
     total = len(ocr_results)
     for page_num, markdown_text in ocr_results:
         doc.add_heading(f"পৃষ্ঠা {page_num + 1}", level=2)

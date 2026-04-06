@@ -1,0 +1,21 @@
+﻿2026-04-06T07:07:22.6722465Z ##[group]Run actions/cache@v4
+2026-04-06T07:07:22.6722729Z with:
+2026-04-06T07:07:22.6722897Z   path: ~/.buildozer
+2026-04-06T07:07:22.6723326Z   key: buildozer-global-Linux-69c8325a6bb70cc7100e98c929576bb8d86499bd7572bdd494197e39d232c38f
+2026-04-06T07:07:22.6723825Z   restore-keys: buildozer-global-Linux-
+
+2026-04-06T07:07:22.6724098Z   enableCrossOsArchive: false
+2026-04-06T07:07:22.6724332Z   fail-on-cache-miss: false
+2026-04-06T07:07:22.6724544Z   lookup-only: false
+2026-04-06T07:07:22.6724726Z   save-always: false
+2026-04-06T07:07:22.6724900Z env:
+2026-04-06T07:07:22.6725127Z   pythonLocation: /opt/hostedtoolcache/Python/3.10.20/x64
+2026-04-06T07:07:22.6725536Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.10.20/x64/lib/pkgconfig
+2026-04-06T07:07:22.6725934Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.10.20/x64
+2026-04-06T07:07:22.6726289Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.10.20/x64
+2026-04-06T07:07:22.6726662Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.10.20/x64
+2026-04-06T07:07:22.6727061Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.10.20/x64/lib
+2026-04-06T07:07:22.6727400Z   JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
+2026-04-06T07:07:22.6727752Z   KEYSTORE_PATH: /home/runner/work/ocr-1/ocr-1/release.keystore
+2026-04-06T07:07:22.6728058Z ##[endgroup]
+2026-04-06T07:07:22.9830588Z Cache not found for input keys: buildozer-global-Linux-69c8325a6bb70cc7100e98c929576bb8d86499bd7572bdd494197e39d232c38f, buildozer-global-Linux-

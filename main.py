@@ -222,6 +222,158 @@ class HeadingLabel(Label):
 
 # ── Converter ─────────────────────────────────────────────────────────────────
 
+# ── Model download helpers ────────────────────────────────────────────────────
+
+def _get_models_dir():
+    """Return the directory where GGUF models should be stored."""
+    if _IS_ANDROID:
+        try:
+            from android.storage import app_storage_path  # type: ignore
+            return os.path.join(app_storage_path(), "models", "gguf")
+        except Exception:
+            pass
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "models")
+
+
+def _models_available():
+    """Check if VL-1.5 GGUF models are downloaded."""
+    models_dir = _get_models_dir()
+    main_gguf = os.path.join(models_dir, "PaddleOCR-VL-1.5.gguf")
+    mmproj_gguf = os.path.join(models_dir, "PaddleOCR-VL-1.5-mmproj.gguf")
+    # Check both exist and are reasonably sized (>100MB each)
+    try:
+        return (
+            os.path.isfile(main_gguf) and os.path.getsize(main_gguf) > 100_000_000
+            and os.path.isfile(mmproj_gguf) and os.path.getsize(mmproj_gguf) > 100_000_000
+        )
+    except OSError:
+        return False
+
+
+def _download_models_background(progress_callback=None, done_callback=None):
+    """Download GGUF models in a background thread."""
+    import urllib.request
+
+    GGUF_BASE = "https://huggingface.co/PaddlePaddle/PaddleOCR-VL-1.5-GGUF/resolve/main"
+    files = [
+        ("PaddleOCR-VL-1.5.gguf", f"{GGUF_BASE}/PaddleOCR-VL-1.5.gguf", 900_000_000),
+        ("PaddleOCR-VL-1.5-mmproj.gguf", f"{GGUF_BASE}/PaddleOCR-VL-1.5-mmproj.gguf", 800_000_000),
+    ]
+
+    models_dir = _get_models_dir()
+    os.makedirs(models_dir, exist_ok=True)
+
+    try:
+        for idx, (fname, url, expected_size) in enumerate(files):
+            dest = os.path.join(models_dir, fname)
+            if os.path.isfile(dest) and os.path.getsize(dest) > expected_size * 0.9:
+                if progress_callback:
+                    progress_callback(idx + 1, len(files), 100, fname)
+                continue
+
+            # Delete partial downloads
+            if os.path.exists(dest):
+                os.unlink(dest)
+
+            tmp_dest = dest + ".tmp"
+
+            def _hook(block, block_size, total, _fname=fname, _idx=idx):
+                if total > 0 and progress_callback:
+                    pct = min(block * block_size * 100 / total, 100)
+                    progress_callback(_idx, len(files), pct, _fname)
+
+            urllib.request.urlretrieve(url, tmp_dest, _hook)
+
+            # Verify and rename
+            if os.path.isfile(tmp_dest) and os.path.getsize(tmp_dest) > expected_size * 0.9:
+                os.rename(tmp_dest, dest)
+            else:
+                if os.path.exists(tmp_dest):
+                    os.unlink(tmp_dest)
+                raise RuntimeError(f"Download incomplete: {fname}")
+
+        if done_callback:
+            done_callback(True, "")
+    except Exception as e:
+        if done_callback:
+            done_callback(False, str(e))
+
+
+class ModelDownloadPopup(Popup):
+    """Popup to download VL-1.5 GGUF models on first use."""
+    def __init__(self, on_complete, **kwargs):
+        super().__init__(
+            title="মডেল ডাউনলোড",
+            title_color=C_TEXT,
+            separator_color=C_PRIMARY,
+            background_color=C_SURFACE,
+            background='',
+            size_hint=(0.92, 0.45),
+            auto_dismiss=False,
+            **kwargs,
+        )
+        self._on_complete = on_complete
+
+        root = BoxLayout(orientation='vertical', padding=dp(16), spacing=dp(12))
+
+        self._status_label = Label(
+            text="VL-1.5 মডেল ডাউনলোড শুরু হচ্ছে...\n(~১.৮GB, WiFi প্রয়োজন)",
+            color=C_TEXT, font_size=sp(14), halign='center',
+            size_hint_y=None, height=dp(50),
+        )
+        self._status_label.bind(size=self._status_label.setter('text_size'))
+        root.add_widget(self._status_label)
+
+        self._progress = ProgressBar(max=100, value=0, size_hint_y=None, height=dp(10))
+        root.add_widget(self._progress)
+
+        self._detail_label = Label(
+            text="", color=C_TEXT_SUB, font_size=sp(12), halign='center',
+            size_hint_y=None, height=dp(30),
+        )
+        self._detail_label.bind(size=self._detail_label.setter('text_size'))
+        root.add_widget(self._detail_label)
+
+        cancel_btn = RoundedButton(
+            text="বাতিল", bg_color=C_ERROR, font_size=sp(14),
+            size_hint_y=None, height=dp(42),
+        )
+        cancel_btn.bind(on_press=lambda x: self._cancel())
+        root.add_widget(cancel_btn)
+
+        self.content = root
+        self._cancelled = False
+
+        # Start download
+        threading.Thread(target=self._download_worker, daemon=True).start()
+
+    def _download_worker(self):
+        def on_progress(file_idx, total_files, pct, fname):
+            if self._cancelled:
+                return
+            overall = ((file_idx * 100 + pct) / total_files)
+            Clock.schedule_once(lambda dt: self._update_progress(overall, fname, pct), 0)
+
+        def on_done(success, error):
+            Clock.schedule_once(lambda dt: self._on_done(success, error), 0)
+
+        _download_models_background(on_progress, on_done)
+
+    def _update_progress(self, overall_pct, fname, file_pct):
+        self._progress.value = overall_pct
+        self._status_label.text = f"ডাউনলোড হচ্ছে: {fname}"
+        self._detail_label.text = f"{file_pct:.0f}% সম্পন্ন"
+
+    def _on_done(self, success, error):
+        self.dismiss()
+        self._on_complete(success, error)
+
+    def _cancel(self):
+        self._cancelled = True
+        self.dismiss()
+        self._on_complete(False, "বাতিল করা হয়েছে")
+
+
 class PDFToDocxConverter:
     def __init__(self):
         self.is_processing = False
@@ -690,12 +842,14 @@ class PDFToDocxApp(App):
     def _info_text(self) -> str:
         mode = self._settings.get("mode", "classic")
         if mode == "vl_server":
+            has_models = _models_available()
+            model_status = "[color=22cc66]✓ মডেল প্রস্তুত[/color]" if has_models else "[color=ffbb33]⚠ মডেল ডাউনলোড প্রয়োজন (~১.৮GB)[/color]"
             return (
                 "[b][color=e0e0ff]VL-1.5 Mode Active[/color][/b]\n\n"
                 "• 94.5% SOTA accuracy\n"
                 "• Supports complex tables & formulas\n"
                 "• Recognizes complex multi-lingual layouts\n"
-                "• High accuracy offline parsing"
+                f"\n{model_status}"
             )
         return (
             "[b][color=e0e0ff]Classic PP-OCRv4 Mode[/color][/b]\n\n"
@@ -703,7 +857,7 @@ class PDFToDocxApp(App):
             "• Uses lightweight standard PP-OCRv4 model\n\n"
             "[b]For higher accuracy (Offline):[/b]\n"
             "Go to Settings - Select VL-1.5 Server\n"
-            "This will use the built-in native model engine."
+            "প্রথমবার ব্যবহারে মডেল auto-download হবে।"
         )
 
     # ── Actions ───────────────────────────────────────────────────────────────
@@ -786,6 +940,27 @@ class PDFToDocxApp(App):
             self.status_label.color = C_ERROR
             return
 
+        # Check if VL-1.5 mode needs models downloaded first
+        if self._settings.get("mode") == "vl_server" and not _models_available():
+            self._prompt_model_download()
+            return
+
+        self._do_start_conversion()
+
+    def _prompt_model_download(self):
+        """Show model download popup if models aren't available."""
+        def on_download_complete(success, error):
+            if success:
+                self._set_status("মডেল ডাউনলোড সম্পন্ন! এখন কনভার্ট করুন", C_SUCCESS)
+                self._refresh_ui()
+            else:
+                self._set_status(f"মডেল ডাউনলোড ব্যর্থ: {error}", C_ERROR)
+
+        self._current_popup = ModelDownloadPopup(on_complete=on_download_complete)
+        self._current_popup.bind(on_dismiss=self._clear_popup)
+        self._current_popup.open()
+
+    def _do_start_conversion(self):
         # BUG-02 fix: thread-safe check for is_processing
         with self.converter._lock:
             if self.converter.is_processing:

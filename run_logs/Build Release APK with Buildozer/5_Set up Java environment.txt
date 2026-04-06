@@ -1,0 +1,12 @@
+﻿2026-04-06T07:07:15.3110610Z ##[group]Run echo "JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64" >> $GITHUB_ENV
+2026-04-06T07:07:15.3111209Z [36;1mecho "JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64" >> $GITHUB_ENV[0m
+2026-04-06T07:07:15.3111673Z [36;1mecho "/usr/lib/jvm/java-17-openjdk-amd64/bin" >> $GITHUB_PATH[0m
+2026-04-06T07:07:15.3169943Z shell: /usr/bin/bash -e {0}
+2026-04-06T07:07:15.3170178Z env:
+2026-04-06T07:07:15.3170427Z   pythonLocation: /opt/hostedtoolcache/Python/3.10.20/x64
+2026-04-06T07:07:15.3170854Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.10.20/x64/lib/pkgconfig
+2026-04-06T07:07:15.3171276Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.10.20/x64
+2026-04-06T07:07:15.3171649Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.10.20/x64
+2026-04-06T07:07:15.3172008Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.10.20/x64
+2026-04-06T07:07:15.3172379Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.10.20/x64/lib
+2026-04-06T07:07:15.3172686Z ##[endgroup]

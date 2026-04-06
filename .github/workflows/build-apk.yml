@@ -15,10 +15,24 @@ jobs:
   build:
     name: Build Release APK with Buildozer
     runs-on: ubuntu-22.04
+    timeout-minutes: 90
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          echo "=== Disk space before cleanup ==="
+          df -h /
+          # Remove large pre-installed software to free space
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /opt/ghc || true
+          sudo rm -rf /opt/hostedtoolcache/CodeQL || true
+          sudo apt-get clean || true
+          echo "=== Disk space after cleanup ==="
+          df -h /
 
       - name: Set up Python 3.10
         uses: actions/setup-python@v5
@@ -90,20 +104,23 @@ jobs:
           restore-keys: |
             buildozer-local-${{ runner.os }}-
 
-      - name: Download Offline AI Models and Binaries
-        env:
-          # Authenticated GitHub API requests get 5000 req/hr (vs 60 anonymous)
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download llama-server binary natively
         run: |
-          # Set default socket timeout to prevent hanging downloads
-          export PYTHONHTTPSVERIFY=1
-          python -c "import socket; socket.setdefaulttimeout(120)"
-          python download_models.py --gguf
+          python download_models.py --binary-only
 
-      - name: Verify Downloaded Assets
+      - name: Verify project structure
         run: |
-          echo "=== Verifying downloaded assets ==="
-          for f in libs/libllama-server.so assets/models/PaddleOCR-VL-1.5.gguf assets/models/PaddleOCR-VL-1.5-mmproj.gguf; do
+          echo "=== Verifying project files ==="
+          for f in main.py ocr_engine.py docx_writer.py buildozer.spec; do
+            if [ -f "$f" ]; then
+              echo "✓ $f"
+            else
+              echo "✗ MISSING: $f"
+              exit 1
+            fi
+          done
+          echo "=== Verifying assets ==="
+          for f in assets/fonts/NotoSansBengali-Regular.ttf assets/images/icon.png assets/images/presplash.png; do
             if [ -f "$f" ]; then
               echo "✓ $f ($(stat -c%s "$f") bytes)"
             else
@@ -111,14 +128,37 @@ jobs:
               exit 1
             fi
           done
-          echo "All assets verified."
+          echo "=== Verifying Android resources ==="
+          for f in android_config/res/xml/network_security_config.xml android_config/res/xml/provider_paths.xml; do
+            if [ -f "$f" ]; then
+              echo "✓ $f"
+            else
+              echo "✗ MISSING: $f"
+              exit 1
+            fi
+          done
+          echo "=== Verifying p4a hook ==="
+          if [ -f "p4a_hooks/hook.py" ]; then
+            echo "✓ p4a_hooks/hook.py"
+          else
+            echo "✗ MISSING: p4a_hooks/hook.py"
+            exit 1
+          fi
+          echo "All project files verified."
+
+      - name: Check disk space before build
+        run: |
+          echo "=== Disk space before build ==="
+          df -h /
+          echo "=== Workspace size ==="
+          du -sh . || true
 
       - name: Build Release APK
         env:
           JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
           ANDROID_HOME: /home/runner/.buildozer/android/platform/android-sdk
-          GRADLE_OPTS: "-Xmx6g -Dorg.gradle.daemon=false -Dorg.gradle.jvmargs='-Xmx6g' -Dorg.gradle.parallel=false -Dorg.gradle.workers.max=1"
-          _JAVA_OPTIONS: "-Xmx6g"
+          GRADLE_OPTS: "-Xmx4g -Dorg.gradle.daemon=false -Dorg.gradle.jvmargs='-Xmx4g' -Dorg.gradle.parallel=false -Dorg.gradle.workers.max=1"
+          _JAVA_OPTIONS: "-Xmx4g"
         run: |
           set -o pipefail
           buildozer -v android release 2>&1 | tee build.log
