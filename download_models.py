@@ -113,69 +113,109 @@ def _extract_tar(tar_path: Path, dest_dir: Path, expected_name: str):
 # ---------------------------------------------------------------------------
 
 def download_llama_server_binary():
-    """Download the newest llama.cpp aarch64 binary for Android offline execution."""
+    """Download the newest llama.cpp aarch64 binary for Android offline execution.
+
+    The llama.cpp project publishes Linux aarch64 binaries as
+    ``llama-<tag>-bin-ubuntu-arm64.tar.gz``.  These statically-linked ELF
+    binaries are compatible with Android's Linux kernel and can be used
+    directly on aarch64 Android devices.
+    """
     logger.info("=" * 60)
     logger.info("llama-server Android বাইনারি ডাউনলোড")
     logger.info("=" * 60)
-    
+
     server_bin = LIBS_DIR / "libllama-server.so"
-    if server_bin.exists():
-        logger.info("llama-server ইতিমধ্যে আছে: %s", server_bin)
+    if server_bin.exists() and server_bin.stat().st_size > 1024:
+        logger.info("llama-server ইতিমধ্যে আছে: %s (%s bytes)", server_bin, server_bin.stat().st_size)
         return True
 
-    # Get latest release from github API dynamically
-    logger.info("Github থেকে লেটেস্ট রিলিজ খোঁজা হচ্ছে...")
-    api_url = "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest"
-    try:
-        # Use GITHUB_TOKEN for authenticated requests (5000 req/hr vs 60 anonymous)
-        req = urllib.request.Request(api_url)
-        gh_token = os.environ.get("GITHUB_TOKEN")
+    # ── helpers ──────────────────────────────────────────────────
+    gh_token = os.environ.get("GITHUB_TOKEN")
+
+    def _gh_api(url: str):
+        """Make an authenticated GitHub API request."""
+        req = urllib.request.Request(url)
+        req.add_header("Accept", "application/vnd.github+json")
         if gh_token:
             req.add_header("Authorization", f"token {gh_token}")
-            logger.info("Using GITHUB_TOKEN for authenticated API request.")
-        with urllib.request.urlopen(req, timeout=30) as response:
-            data = json.loads(response.read().decode())
-            assets = data.get("assets", [])
-            download_url = None
-            for asset in assets:
-                if "android-aarch64.zip" in asset.get("name", ""):
-                    download_url = asset.get("browser_download_url")
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read().decode())
+
+    def _find_arm64_asset(assets: list):
+        """Return the download URL of the ubuntu-arm64 tar.gz asset."""
+        for asset in assets:
+            name = asset.get("name", "")
+            # Pattern: llama-b<N>-bin-ubuntu-arm64.tar.gz
+            if "ubuntu-arm64" in name and name.endswith(".tar.gz"):
+                return asset.get("browser_download_url"), name
+        return None, None
+
+    # ── search releases ─────────────────────────────────────────
+    if gh_token:
+        logger.info("Using GITHUB_TOKEN for authenticated API request.")
+
+    download_url = None
+    asset_name = None
+
+    # Try latest release first
+    try:
+        logger.info("Github থেকে লেটেস্ট রিলিজ খোঁজা হচ্ছে...")
+        data = _gh_api("https://api.github.com/repos/ggml-org/llama.cpp/releases/latest")
+        download_url, asset_name = _find_arm64_asset(data.get("assets", []))
+        if download_url:
+            logger.info("লেটেস্ট রিলিজ (%s) এ পাওয়া গেছে: %s", data.get("tag_name"), asset_name)
+    except Exception as exc:
+        logger.warning("Latest release API failed: %s", exc)
+
+    # Fallback: iterate recent releases (some tags skip certain assets)
+    if not download_url:
+        try:
+            logger.info("লেটেস্ট-এ পাওয়া যায়নি, সাম্প্রতিক রিলিজগুলো চেক করা হচ্ছে...")
+            releases = _gh_api("https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=15")
+            for rel in releases:
+                download_url, asset_name = _find_arm64_asset(rel.get("assets", []))
+                if download_url:
+                    logger.info("রিলিজ %s এ পাওয়া গেছে: %s", rel.get("tag_name"), asset_name)
                     break
-            
-            if not download_url:
-                logger.error("aarch64 Android বাইনারি পাওয়া যায়নি।")
-                return False
-                
-            tmp_zip = LIBS_DIR / "llama-aarch64.zip"
-            _download(download_url, tmp_zip, "llama.cpp Android Release")
-            
-            # Extract only llama-server — match by basename, exclude .exe
-            logger.info("Unzipping llama-server...")
-            found = False
-            with zipfile.ZipFile(tmp_zip, "r") as zf:
-                for file_info in zf.infolist():
-                    basename = os.path.basename(file_info.filename)
-                    # Match 'llama-server' exactly (not llama-server.exe or llama-server-cuda)
-                    if basename == "llama-server" and not file_info.is_dir():
-                        with zf.open(file_info) as source:
-                            with open(server_bin, "wb") as target:
-                                shutil.copyfileobj(source, target)
+        except Exception as exc:
+            logger.warning("Release list API failed: %s", exc)
+
+    if not download_url:
+        logger.error("aarch64 Linux (ubuntu-arm64) বাইনারি কোনো রিলিজেই পাওয়া যায়নি।")
+        return False
+
+    # ── download & extract ──────────────────────────────────────
+    try:
+        tmp_tar = LIBS_DIR / "llama-arm64.tar.gz"
+        _download(download_url, tmp_tar, f"llama.cpp arm64 ({asset_name})")
+
+        logger.info("tar.gz থেকে llama-server বের করা হচ্ছে...")
+        found = False
+        with tarfile.open(tmp_tar, "r:gz") as tf:
+            for member in tf.getmembers():
+                basename = os.path.basename(member.name)
+                if basename == "llama-server" and member.isfile():
+                    src = tf.extractfile(member)
+                    if src:
+                        with open(server_bin, "wb") as dst:
+                            shutil.copyfileobj(src, dst)
                         found = True
+                        logger.info("Extracted: %s → %s", member.name, server_bin)
                         break
-            
-            tmp_zip.unlink(missing_ok=True)
-            
-            if server_bin.exists() and server_bin.stat().st_size > 1024:
-                logger.info("llama-server সফলভাবে ডাউনলোড হয়েছে! (%s bytes)", server_bin.stat().st_size)
-                return True
-            else:
-                logger.error("llama-server এক্সট্রাক্ট হয়নি — zip-এ 'llama-server' নামে ফাইল পাওয়া যায়নি।")
-                if not found:
-                    logger.error("Zip contents: %s", [f.filename for f in zipfile.ZipFile(tmp_zip).infolist()] if tmp_zip.exists() else 'zip deleted')
-                return False
-                
+
+        tmp_tar.unlink(missing_ok=True)
+
+        if found and server_bin.exists() and server_bin.stat().st_size > 1024:
+            logger.info("llama-server সফলভাবে ডাউনলোড হয়েছে! (%s bytes)", server_bin.stat().st_size)
+            return True
+        else:
+            logger.error("llama-server এক্সট্রাক্ট হয়নি — tar.gz-এ 'llama-server' নামে ফাইল পাওয়া যায়নি।")
+            return False
+
     except Exception as e:
         logger.error("llama-server ডাউনলোড ব্যর্থ: %s", e)
+        if server_bin.exists():
+            server_bin.unlink(missing_ok=True)
         return False
 
 
