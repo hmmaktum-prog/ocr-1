@@ -12,7 +12,7 @@ version = 1.2.0
 
 # NOTE: python-docx removed — replaced by pure-Python docx_writer.py (no lxml needed)
 # NOTE: Models are NOT bundled in APK — downloaded on first run
-requirements = python3,kivy==2.3.0,pillow,numpy,pyjnius,android
+requirements = python3,kivy==2.3.0,pillow,numpy==1.26.4,pyjnius,android
 
 orientation = portrait
 fullscreen = 0
