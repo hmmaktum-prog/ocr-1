@@ -23,6 +23,7 @@ android.accept_sdk_license = True
 android.archs = arm64-v8a
 android.enable_androidx = True
 android.add_libs_aarch64 = libs/libllama-server.so
+android.aapt_no_compress = gguf,so,bin
 android.release_artifact = apk
 
 # Allow cleartext HTTP for llama.cpp localhost server only
