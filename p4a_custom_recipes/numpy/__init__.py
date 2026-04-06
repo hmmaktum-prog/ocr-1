@@ -33,7 +33,7 @@ class NumpyRecipe(CompiledComponentsPythonRecipe):
 
     def build_compiled_components(self, arch):
         """Ensure setuptools is available in hostpython3 before building numpy extensions."""
-        hp = self.hostpython_location(arch)
+        hp = self.hostpython_location
         shprint(sh.Command(hp), '-m', 'pip', 'install', '--quiet', 'setuptools')
         super().build_compiled_components(arch)
 
