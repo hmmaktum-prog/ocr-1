@@ -30,7 +30,7 @@ android.aapt_no_compress = so
 android.release_artifact = apk
 
 # XML resources for network security config and FileProvider paths
-android.add_resources = android_config/res:res
+android.add_resources = android_config/res
 
 # FileProvider & manifest patching via p4a hook (not android.add_src)
 p4a.hook = p4a_hooks/hook.py
