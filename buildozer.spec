@@ -6,7 +6,7 @@ package.domain = org.pdftoocr
 source.dir = .
 source.include_exts = py,png,jpg,kv,atlas,ttf
 source.include_patterns = assets/fonts/*.ttf,assets/images/*.png
-source.exclude_dirs = .git,.buildozer,.pythonlibs,.local,.github,__pycache__,attached_assets,.bolt,.agents,.cache,.replit,run_logs,models,libs,p4a_hooks
+source.exclude_dirs = .git,.buildozer,.pythonlibs,.local,.github,__pycache__,attached_assets,.bolt,.agents,.cache,.replit,run_logs,models,libs,p4a_hooks,p4a_custom_recipes
 
 version = 1.2.0
 
@@ -34,6 +34,7 @@ android.add_resources = android_config/res
 
 # FileProvider & manifest patching via p4a hook (not android.add_src)
 p4a.hook = p4a_hooks/hook.py
+p4a.local_recipes = ./p4a_custom_recipes
 
 # Allow cleartext HTTP for llama.cpp localhost server only
 android.manifest.uses_permission = android.permission.INTERNET
