@@ -11,6 +11,9 @@ on:
       - master
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build:
     name: Build Release APK with Buildozer
@@ -104,6 +107,30 @@ jobs:
           restore-keys: |
             buildozer-local-${{ runner.os }}-
 
+      - name: Patch p4a numpy recipe URL (pypi.python.org is defunct)
+        run: |
+          # pypi.python.org legacy URLs return HTTP 404 since ~2024.
+          # If the cached p4a already contains the broken numpy recipe, patch it now.
+          # The primary fix is p4a_custom_recipes/numpy/__init__.py via p4a.local_recipes.
+          # This step is a safety-net for cache hits that still carry the old recipe.
+          P4A_RECIPE=".buildozer/android/platform/python-for-android/pythonforandroid/recipes/numpy/__init__.py"
+          if [ -f "$P4A_RECIPE" ]; then
+            echo "Found cached p4a numpy recipe — patching URL..."
+            NUMPY_URL=$(python3 -c "
+          import urllib.request, json
+          data = json.loads(urllib.request.urlopen('https://pypi.org/pypi/numpy/1.26.4/json').read())
+          sdist = [u for u in data['urls'] if u['packagetype'] == 'sdist']
+          print(sdist[0]['url'])
+          ")
+            echo "Correct numpy sdist URL: $NUMPY_URL"
+            sed -i "s|https://pypi.python.org/packages/source/n/numpy/numpy-{version}.zip|${NUMPY_URL}|g" "$P4A_RECIPE"
+            grep -n "url" "$P4A_RECIPE" | head -5
+            echo "Patch applied."
+          else
+            echo "No cached p4a recipe found — p4a.local_recipes override will handle it."
+          fi
+          echo "Custom numpy recipe: $(ls p4a_custom_recipes/numpy/__init__.py)"
+
       - name: Download llama-server binary natively
         run: |
           python download_models.py --binary-only
@@ -142,6 +169,13 @@ jobs:
             echo "✓ p4a_hooks/hook.py"
           else
             echo "✗ MISSING: p4a_hooks/hook.py"
+            exit 1
+          fi
+          echo "=== Verifying custom numpy recipe ==="
+          if [ -f "p4a_custom_recipes/numpy/__init__.py" ]; then
+            echo "✓ p4a_custom_recipes/numpy/__init__.py"
+          else
+            echo "✗ MISSING: p4a_custom_recipes/numpy/__init__.py"
             exit 1
           fi
           echo "All project files verified."
